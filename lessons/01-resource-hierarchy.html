@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#1 リソース階層と課金 | GCP 学習</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<!-- 矢印の定義（ページ内の全 SVG で共有） -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="d-arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+    <marker id="arr-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="d-arrowhead-ok" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+</svg>
+
+<main>
+<p class="breadcrumb"><a href="../index.html">← ロードマップ</a></p>
+<h1>#1 リソース階層と課金</h1>
+<p class="lead">GCP のリソースがどう整理され、権限・ルール・お金がどう流れるかを理解する</p>
+
+<div class="card">
+<strong>この回のゴール</strong>
+<ul>
+  <li>組織・フォルダ・プロジェクト・サービスのリソースの4つの階層を説明できる</li>
+  <li>IAM の権限が上の階層から引き継がれる仕組みと、その注意点を説明できる</li>
+  <li>IAM と組織ポリシーの違い、課金と階層の関係を説明できる</li>
+  <li>請求先アカウントが何で、プロジェクトの紐付けにどの権限が必要か説明できる</li>
+  <li>新しく参画した環境で、何を確認すればよいか分かる</li>
+</ul>
+</div>
+
+<!-- ============================================================ -->
+<h2>1. 4つの階層</h2>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 340" role="img" aria-labelledby="f1-title">
+  <title id="f1-title">リソース階層：組織の下にフォルダ（本番・開発）、その下にプロジェクト、その下にリソースがある</title>
+  <!-- 階層名 -->
+  <text class="d-s d-b" x="20" y="49">組織</text>
+  <text class="d-s d-b" x="20" y="137">フォルダ</text>
+  <text class="d-s d-b" x="20" y="223">プロジェクト</text>
+  <text class="d-s d-b" x="20" y="306">サービスのリソース</text>
+  <line class="d-line d-dashed" x1="120" y1="88" x2="800" y2="88" opacity="0.4"/>
+  <line class="d-line d-dashed" x1="120" y1="175" x2="800" y2="175" opacity="0.4"/>
+  <line class="d-line d-dashed" x1="120" y1="262" x2="800" y2="262" opacity="0.4"/>
+
+  <!-- 接続線 -->
+  <path class="d-line" d="M470,68 L300,110 M470,68 L640,110"/>
+  <path class="d-line" d="M300,154 L300,196 M640,154 L570,196 M640,154 L710,196"/>
+  <path class="d-line" d="M300,240 L245,284 M300,240 L355,284 M570,240 L570,284 M710,240 L710,284"/>
+
+  <!-- 組織 -->
+  <rect class="d-accent" x="370" y="20" width="200" height="48" rx="8"/>
+  <text class="d-t d-b" x="470" y="42" text-anchor="middle">組織</text>
+  <text class="d-s" x="470" y="60" text-anchor="middle">example.co.jp</text>
+
+  <!-- フォルダ -->
+  <rect class="d-box" x="210" y="110" width="180" height="44" rx="8"/>
+  <text class="d-t" x="300" y="138" text-anchor="middle">📁 本番</text>
+  <rect class="d-box" x="550" y="110" width="180" height="44" rx="8"/>
+  <text class="d-t" x="640" y="138" text-anchor="middle">📁 開発</text>
+
+  <!-- プロジェクト -->
+  <rect class="d-box" x="220" y="196" width="160" height="44" rx="8"/>
+  <text class="d-t" x="300" y="224" text-anchor="middle">myapp-prod</text>
+  <rect class="d-box" x="505" y="196" width="130" height="44" rx="8"/>
+  <text class="d-t" x="570" y="224" text-anchor="middle">myapp-dev</text>
+  <rect class="d-box" x="645" y="196" width="130" height="44" rx="8"/>
+  <text class="d-t" x="710" y="224" text-anchor="middle">myapp-stg</text>
+
+  <!-- リソース -->
+  <rect class="d-box" x="195" y="284" width="100" height="34" rx="17"/>
+  <text class="d-s" x="245" y="306" text-anchor="middle">Cloud Run</text>
+  <rect class="d-box" x="305" y="284" width="100" height="34" rx="17"/>
+  <text class="d-s" x="355" y="306" text-anchor="middle">Cloud SQL</text>
+  <rect class="d-box" x="520" y="284" width="100" height="34" rx="17"/>
+  <text class="d-s" x="570" y="306" text-anchor="middle">VM</text>
+  <rect class="d-box" x="660" y="284" width="100" height="34" rx="17"/>
+  <text class="d-s" x="710" y="306" text-anchor="middle">Cloud Run</text>
+</svg>
+<figcaption>図1：よくある構成の例。フォルダは環境別や部署別に切ることが多い</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>階層</th><th>役割</th><th>AWS で近いもの</th></tr></thead>
+  <tbody>
+    <tr><td>組織</td><td>会社全体のルート。Google Workspace または Cloud Identity のドメインと 1 対 1 で対応する</td><td>AWS Organizations のルート</td></tr>
+    <tr><td>フォルダ</td><td>プロジェクトをまとめる。入れ子にできる（最大10階層）</td><td>OU（組織単位）</td></tr>
+    <tr><td>プロジェクト</td><td>サービスのリソースを入れる箱。API の有効化、割り当て、課金の紐付けはプロジェクト単位</td><td>AWS アカウント（ただし、作るのはずっと手軽）</td></tr>
+    <tr><td>サービスのリソース</td><td>VM、Cloud Run のサービス、バケットなど。必ずどれか1つのプロジェクトに属する</td><td>各リソース</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout">
+<strong>用語（公式ドキュメントに準拠）</strong>
+<ul>
+  <li>公式ドキュメントでは、組織・フォルダ・プロジェクトもそれぞれ <strong>organization resource / folder resource / project resource</strong> と呼ばれ、<strong>すべて「リソース」</strong>です</li>
+  <li>階層の一番下にある VM やバケットなどは、<strong>service resources（サービスのリソース）</strong>と呼ばれます</li>
+  <li>組織・フォルダ・プロジェクトのように、ほかのリソースを中に含むリソースは <strong>container resource</strong> と呼ばれます</li>
+  <li>階層上の位置関係は <strong>parent（親）・child（子）・ancestors（祖先）</strong>で表します。組織は階層の <strong>root node</strong> です</li>
+</ul>
+</div>
+
+<!-- ============================================================ -->
+<h2>2. IAM の権限は上から引き継がれる</h2>
+<p>IAM の許可ポリシー（誰にどのロールを与えるか）は、<strong>上の階層で設定すると、下の階層すべてに引き継がれます。</strong></p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 330" role="img" aria-labelledby="f2-title">
+  <title id="f2-title">IAMの継承：フォルダで付与した編集者ロールが配下のプロジェクトに引き継がれる。実際に効く権限は各階層のIAM許可ポリシーの合計で、下の階層の許可ポリシーでは取り消せない。引き算をするのは拒否ポリシー</title>
+  <!-- 左：継承の例 -->
+  <rect class="d-accent" x="80" y="24" width="220" height="58" rx="8"/>
+  <text class="d-t d-b" x="190" y="48" text-anchor="middle">📁 フォルダ「開発」</text>
+  <text class="d-s" x="190" y="70" text-anchor="middle">開発チーム ＝ 編集者 を付与</text>
+
+  <path class="d-line-ok" d="M160,82 L100,166" marker-end="url(#arr-ok)"/>
+  <path class="d-line-ok" d="M220,82 L280,166" marker-end="url(#arr-ok)"/>
+  <text class="d-s d-c-ok d-b" x="190" y="132" text-anchor="middle">引き継ぐ</text>
+
+  <rect class="d-box" x="20" y="170" width="150" height="46" rx="8"/>
+  <text class="d-t" x="95" y="198" text-anchor="middle">myapp-dev</text>
+  <rect class="d-box" x="210" y="170" width="150" height="46" rx="8"/>
+  <text class="d-t" x="285" y="198" text-anchor="middle">myapp-stg</text>
+
+  <rect class="d-ok" x="30" y="228" width="130" height="28" rx="14"/>
+  <text class="d-s d-c-ok" x="95" y="247" text-anchor="middle">編集者（継承）</text>
+  <rect class="d-ok" x="220" y="228" width="130" height="28" rx="14"/>
+  <text class="d-s d-c-ok" x="285" y="247" text-anchor="middle">編集者（継承）</text>
+
+  <text class="d-s" x="190" y="292" text-anchor="middle">プロジェクト側のポリシーに書かなくても、</text>
+  <text class="d-s" x="190" y="310" text-anchor="middle">開発チームは両方のプロジェクトを編集できる</text>
+
+  <!-- 右：ルール -->
+  <rect class="d-box" x="420" y="24" width="380" height="120" rx="10"/>
+  <text class="d-t d-b" x="610" y="50" text-anchor="middle">実際に効く権限（IAM）</text>
+  <rect class="d-accent" x="440" y="62" width="100" height="44" rx="6"/>
+  <text class="d-s d-b" x="490" y="81" text-anchor="middle">組織</text>
+  <text class="d-s" x="490" y="98" text-anchor="middle">の IAM</text>
+  <text class="d-t d-b" x="555" y="90" text-anchor="middle">＋</text>
+  <rect class="d-accent" x="570" y="62" width="100" height="44" rx="6"/>
+  <text class="d-s d-b" x="620" y="81" text-anchor="middle">フォルダ</text>
+  <text class="d-s" x="620" y="98" text-anchor="middle">の IAM</text>
+  <text class="d-t d-b" x="685" y="90" text-anchor="middle">＋</text>
+  <rect class="d-accent" x="700" y="62" width="88" height="44" rx="6"/>
+  <text class="d-s d-b" x="744" y="81" text-anchor="middle">プロジェクト</text>
+  <text class="d-s" x="744" y="98" text-anchor="middle">の IAM</text>
+  <text class="d-s" x="610" y="130" text-anchor="middle">各階層に設定した IAM 許可ポリシーの合計（和集合）</text>
+
+  <rect class="d-warn" x="420" y="166" width="380" height="146" rx="10"/>
+  <text class="d-t d-b d-c-warn" x="610" y="194" text-anchor="middle">⚠ 許可ポリシーでは取り消せない</text>
+  <text class="d-s" x="610" y="220" text-anchor="middle">許可ポリシーは「足し算」だけ。下の階層の許可ポリシーから</text>
+  <text class="d-s" x="610" y="240" text-anchor="middle">外しても、上の階層で与えた権限は残る</text>
+  <text class="d-s" x="610" y="270" text-anchor="middle">「引き算」をするのは、別の仕組みの</text>
+  <text class="d-t" x="610" y="294" text-anchor="middle">IAM 拒否ポリシー（Deny）</text>
+</svg>
+<figcaption>図2：継承の仕組み（左）と、ACE で必ず問われる2つのルール（右）</figcaption>
+</figure>
+
+<div class="callout ace">
+<strong>ACE のポイント</strong>
+<ul>
+  <li>実際に効く権限は、操作するリソースと、その祖先（上の階層）すべての IAM 許可ポリシーの合計</li>
+  <li>上の階層で与えた権限は、下の階層の許可ポリシーでは取り消せない</li>
+  <li>そのため、権限は<strong>できるだけ下の階層で、必要な分だけ</strong>与えるのが原則</li>
+  <li>権限を「引き算」できるのは、別の仕組みである <strong>IAM 拒否ポリシー</strong>。拒否ポリシーは組織・フォルダ・プロジェクトに設定でき、<strong>許可ポリシーより優先される</strong></li>
+  <li>複数のプロジェクトに同じ権限を配りたいときは、<strong>フォルダにまとめてフォルダで付与する</strong>と管理が楽になる</li>
+</ul>
+</div>
+
+<!-- ============================================================ -->
+<h2>3. 組織ポリシー：「どんな設定を許すか」</h2>
+<p>IAM は「<strong>誰が</strong>何をできるか」を決める仕組みです。これとは別に、<strong>組織ポリシー</strong>で「この組織では<strong>どんな設定</strong>を許すか」を決められます。組織ポリシーも、上の階層から引き継がれます。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 240" role="img" aria-labelledby="f3-title">
+  <title id="f3-title">IAMは誰が何をできるか、組織ポリシーはどんな設定を許すかを決める。操作は両方を満たしたときだけ成功する</title>
+  <rect class="d-accent" x="20" y="20" width="360" height="124" rx="10"/>
+  <text class="d-t d-b" x="200" y="50" text-anchor="middle">IAM（許可ポリシー）</text>
+  <text class="d-t" x="200" y="80" text-anchor="middle">「誰が」何をできるか</text>
+  <text class="d-s" x="200" y="110" text-anchor="middle">例：開発チームは VM を作成できる</text>
+  <text class="d-s" x="200" y="130" text-anchor="middle">対象：ユーザー、グループ、サービスアカウント</text>
+
+  <rect class="d-note" x="440" y="20" width="360" height="124" rx="10"/>
+  <text class="d-t d-b" x="620" y="50" text-anchor="middle">組織ポリシー</text>
+  <text class="d-t" x="620" y="80" text-anchor="middle">「どんな設定」を許すか</text>
+  <text class="d-s" x="620" y="110" text-anchor="middle">例：外部IPアドレス付きの VM は禁止</text>
+  <text class="d-s" x="620" y="130" text-anchor="middle">対象：リソースの設定（誰が操作しても同じ）</text>
+
+  <path class="d-line" d="M200,144 L330,180" marker-end="url(#arr)"/>
+  <path class="d-line" d="M620,144 L490,180" marker-end="url(#arr)"/>
+  <rect class="d-box" x="210" y="182" width="400" height="44" rx="22"/>
+  <text class="d-t d-b" x="410" y="210" text-anchor="middle">両方の条件を満たしたときだけ操作が成功する</text>
+</svg>
+<figcaption>図3：VM を作る権限がある人でも、組織ポリシーで禁止された設定の VM は作れない</figcaption>
+</figure>
+
+<h3>3-1. 組織・フォルダ・プロジェクトには、IAM と組織ポリシーの両方を設定できる</h3>
+<p>「組織ポリシー」は<strong>仕組みの名前</strong>で、「組織にしか設定できないポリシー」という意味ではありません。組織・フォルダ・プロジェクトのどれにも、IAM と組織ポリシーの両方を設定できます。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 360" role="img" aria-labelledby="f4-title">
+  <title id="f4-title">組織、フォルダ、プロジェクトには、IAMポリシーと組織ポリシーの両方を設定できる。サービスのリソースにはIAM許可ポリシーだけを設定でき（一部のみ）、組織ポリシーは設定できないが上の制約が適用される</title>
+  <!-- 列見出し -->
+  <text class="d-s d-b" x="85" y="26" text-anchor="middle">リソース</text>
+  <text class="d-t d-b d-c-accent" x="345" y="26" text-anchor="middle">IAM</text>
+  <text class="d-t d-b d-c-note" x="670" y="26" text-anchor="middle">組織ポリシー</text>
+
+  <!-- 引き継ぎの矢印 -->
+  <path class="d-line" d="M345,98 L345,116" marker-end="url(#arr)"/>
+  <path class="d-line" d="M345,178 L345,196" marker-end="url(#arr)"/>
+  <path class="d-line" d="M345,258 L345,276" marker-end="url(#arr)"/>
+  <path class="d-line" d="M670,98 L670,116" marker-end="url(#arr)"/>
+  <path class="d-line" d="M670,178 L670,196" marker-end="url(#arr)"/>
+  <path class="d-line" d="M670,258 L670,276" marker-end="url(#arr)"/>
+
+  <!-- 組織 -->
+  <rect class="d-accent" x="20" y="40" width="130" height="56" rx="8"/>
+  <text class="d-t d-b" x="85" y="74" text-anchor="middle">組織</text>
+  <rect class="d-accent" x="180" y="40" width="330" height="56" rx="8"/>
+  <text class="d-t" x="345" y="74" text-anchor="middle">許可ポリシー ／ 拒否ポリシー</text>
+  <rect class="d-note" x="540" y="40" width="260" height="56" rx="8"/>
+  <text class="d-t" x="670" y="74" text-anchor="middle">制約（constraint）を設定</text>
+
+  <!-- フォルダ -->
+  <rect class="d-box" x="20" y="120" width="130" height="56" rx="8"/>
+  <text class="d-t d-b" x="85" y="154" text-anchor="middle">📁 フォルダ</text>
+  <rect class="d-accent" x="180" y="120" width="330" height="56" rx="8"/>
+  <text class="d-t" x="345" y="154" text-anchor="middle">許可ポリシー ／ 拒否ポリシー</text>
+  <rect class="d-note" x="540" y="120" width="260" height="56" rx="8"/>
+  <text class="d-t" x="670" y="154" text-anchor="middle">制約（constraint）を設定</text>
+
+  <!-- プロジェクト -->
+  <rect class="d-box" x="20" y="200" width="130" height="56" rx="8"/>
+  <text class="d-t d-b" x="85" y="234" text-anchor="middle">プロジェクト</text>
+  <rect class="d-accent" x="180" y="200" width="330" height="56" rx="8"/>
+  <text class="d-t" x="345" y="234" text-anchor="middle">許可ポリシー ／ 拒否ポリシー</text>
+  <rect class="d-note" x="540" y="200" width="260" height="56" rx="8"/>
+  <text class="d-t" x="670" y="234" text-anchor="middle">制約（constraint）を設定</text>
+
+  <!-- リソース -->
+  <rect class="d-box" x="20" y="280" width="130" height="56" rx="28"/>
+  <text class="d-t d-b" x="85" y="304" text-anchor="middle">サービスの</text>
+  <text class="d-t d-b" x="85" y="324" text-anchor="middle">リソース</text>
+  <rect class="d-accent" x="180" y="280" width="330" height="56" rx="8"/>
+  <text class="d-t" x="345" y="304" text-anchor="middle">許可ポリシー</text>
+  <text class="d-s" x="345" y="324" text-anchor="middle">（バケットなど一部のみ）</text>
+  <rect class="d-box d-dashed" x="540" y="280" width="260" height="56" rx="8"/>
+  <text class="d-s" x="670" y="304" text-anchor="middle">ここには設定できない</text>
+  <text class="d-s" x="670" y="324" text-anchor="middle">（上から引き継いだ制約が適用される）</text>
+</svg>
+<figcaption>図4：「組織ポリシー」は仕組みの名前で、組織以外にも設定できる。矢印は子への引き継ぎ</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th></th><th>IAM 許可ポリシー</th><th>組織ポリシー</th></tr></thead>
+  <tbody>
+    <tr><td>決めること</td><td>誰が何をできるか</td><td>どんな設定を許すか</td></tr>
+    <tr><td>設定できる場所</td><td>組織、フォルダ、プロジェクト、一部のサービスのリソース</td><td>組織、フォルダ、プロジェクト</td></tr>
+    <tr><td>引き継ぎ方</td><td>下に引き継がれ、合計で効く。<strong>下の階層の許可ポリシーでは取り消せない</strong>（引き算は拒否ポリシーで行う）</td><td>下に引き継がれる。<strong>下の階層で上書きすることもできる</strong></td></tr>
+    <tr><td>設定・上書きできる人</td><td>そのリソースの IAM を管理できる人</td><td>組織ポリシー管理者。このロールは組織の階層でしか付与できないため、実務では中央の管理者に限られる</td></tr>
+  </tbody>
+</table>
+</div>
+<p>IAM 拒否ポリシーも、組織・フォルダ・プロジェクトに設定できます。</p>
+
+<h3>3-2. 操作が成功するまでの判定</h3>
+<p>項番2の「合計」は、<strong>IAM の中で</strong>各階層のポリシーをどう組み合わせるかの話です。図3の「両方を満たす」は、<strong>IAM と組織ポリシーという別々の仕組み</strong>をどう組み合わせるかの話です。2つを合わせると、判定は次のようになります。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 340" role="img" aria-labelledby="f5-title">
+  <title id="f5-title">判定の流れ：IAMでは各階層の許可ポリシーの合計から拒否ポリシーの分を除いて操作してよいかを判定する。組織ポリシーでは引き継がれた制約から設定が許されるかを判定する。両方がOKのときだけ操作が成功する</title>
+  <!-- IAM 側 -->
+  <text class="d-t d-b d-c-accent" x="205" y="22" text-anchor="middle">IAM（項番2）</text>
+  <rect class="d-accent" x="40" y="34" width="330" height="56" rx="8"/>
+  <text class="d-t" x="205" y="58" text-anchor="middle">許可ポリシーの合計（OR）</text>
+  <text class="d-s" x="205" y="78" text-anchor="middle">組織 ＋ フォルダ ＋ プロジェクト ＋ サービスのリソース</text>
+  <path class="d-line" d="M205,90 L205,110" marker-end="url(#arr)"/>
+  <rect class="d-warn" x="40" y="112" width="330" height="44" rx="8"/>
+  <text class="d-t" x="205" y="139" text-anchor="middle">− 拒否ポリシーで拒否された権限</text>
+  <path class="d-line" d="M205,156 L205,176" marker-end="url(#arr)"/>
+  <rect class="d-box" x="40" y="178" width="330" height="44" rx="22"/>
+  <text class="d-t d-b" x="205" y="205" text-anchor="middle">この人は、この操作をしてよいか？</text>
+
+  <!-- 組織ポリシー側 -->
+  <text class="d-t d-b d-c-note" x="615" y="22" text-anchor="middle">組織ポリシー（項番3）</text>
+  <rect class="d-note" x="450" y="34" width="330" height="56" rx="8"/>
+  <text class="d-t" x="615" y="58" text-anchor="middle">引き継がれた制約</text>
+  <text class="d-s" x="615" y="78" text-anchor="middle">組織 → フォルダ → プロジェクト</text>
+  <path class="d-line" d="M615,90 L615,110" marker-end="url(#arr)"/>
+  <rect class="d-box d-dashed" x="450" y="112" width="330" height="44" rx="8"/>
+  <text class="d-t" x="615" y="139" text-anchor="middle">下の階層での上書きがあれば反映</text>
+  <path class="d-line" d="M615,156 L615,176" marker-end="url(#arr)"/>
+  <rect class="d-box" x="450" y="178" width="330" height="44" rx="22"/>
+  <text class="d-t d-b" x="615" y="205" text-anchor="middle">この設定は許されるか？</text>
+
+  <!-- AND -->
+  <path class="d-line" d="M205,222 L392,252" marker-end="url(#arr)"/>
+  <path class="d-line" d="M615,222 L428,252" marker-end="url(#arr)"/>
+  <circle class="d-box" cx="410" cy="260" r="22"/>
+  <text class="d-t d-b" x="410" y="265" text-anchor="middle">AND</text>
+  <path class="d-line" d="M410,282 L410,290" marker-end="url(#arr)"/>
+  <rect class="d-ok" x="290" y="292" width="240" height="40" rx="20"/>
+  <text class="d-t d-b d-c-ok" x="410" y="318" text-anchor="middle">両方 OK のときだけ成功</text>
+</svg>
+<figcaption>図5：どちらか一方でも NG なら操作は失敗する</figcaption>
+</figure>
+
+<div class="callout lead-tip">
+<strong>テックリードの視点：失敗の原因を見分ける</strong>
+権限が足りないときは「権限（permission）がない」という内容のエラーになります。組織ポリシーに違反したときは、エラーメッセージに <code>constraints/...</code> が含まれます。どちらの仕組みで止められたのかを見分けると、相談先（IAM の管理者か、組織ポリシーの管理者か）がすぐに分かります。
+</div>
+
+<p>よく使われる組織ポリシーの例：</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>やりたいこと</th><th>制約（constraint）</th></tr></thead>
+  <tbody>
+    <tr><td>リソースを作れるリージョンを限定する</td><td><code>constraints/gcp.resourceLocations</code></td></tr>
+    <tr><td>VM に外部IPアドレスを付けることを禁止する</td><td><code>constraints/compute.vmExternalIpAccess</code></td></tr>
+    <tr><td>新しいプロジェクトで <code>default</code> ネットワークを自動作成しない</td><td><code>constraints/compute.skipDefaultNetworkCreation</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout">
+<strong>AWS との比較</strong>
+組織全体の「ガードレール」という意味で、AWS の SCP に近い位置づけです。ただし SCP が「権限」を制限するのに対し、組織ポリシーは「リソースの設定」を制限します。特定の人の権限を制限したいなら、IAM 拒否ポリシーを使います。
+</div>
+
+
+<!-- ============================================================ -->
+<h2>4. 課金は階層とは別の線でつながる</h2>
+<p>GCP の料金は、<strong>請求先アカウント（Cloud Billing account）</strong>を通して支払います。名前に「アカウント」と付いていますが、ログインに使うアカウントとは別物です。ここではまず「請求先アカウントとは何か」を整理し、次に階層との関係、最後にプロジェクトを紐付けるのに必要な権限を見ます。</p>
+
+<h3>4-1. 請求先アカウントは「ログインするアカウント」ではない</h3>
+<p>課金の話には、「アカウント」と付くものや、それに近いものが3つ出てきます。混ざりやすいので、最初に区別しておきます。</p>
+
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th>名前</th><th>何か</th><th>例</th></tr></thead>
+  <tbody>
+    <tr><td>Google アカウント<br>（ユーザー アカウント）</td><td>ログインする人。IAM の<strong>プリンシパル</strong>になる</td><td><code>user:alice@example.com</code></td></tr>
+    <tr><td>請求先アカウント<br>（Cloud Billing account）</td><td>GCP の<strong>リソース</strong>の一つ。紐付いたプロジェクトの費用を記録し、お支払いプロファイルを使って支払う</td><td><code>XXXXXX-XXXXXX-XXXXXX</code> 形式の ID</td></tr>
+    <tr><td>お支払いプロファイル<br>（Google payments profile）</td><td>誰がどうやって払うか。名前、住所、カードや銀行口座などを持つ。GCP だけでなく Google の各サービスで共通</td><td>種類は「個人」と「組織」の2つ</td></tr>
+  </tbody>
+</table>
+</div>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 280" role="img" aria-labelledby="f6-title">
+  <title id="f6-title">Google アカウントは請求先アカウントの許可ポリシーでロールを持つ。請求先アカウントはお支払いプロファイルを使って、紐付いたプロジェクトの費用を払う</title>
+  <!-- Google アカウント -->
+  <rect class="d-box" x="10" y="44" width="200" height="96" rx="10"/>
+  <text class="d-t d-b" x="110" y="74" text-anchor="middle">👤 Google アカウント</text>
+  <text class="d-s" x="110" y="98" text-anchor="middle">user:alice@example.com</text>
+  <text class="d-s" x="110" y="120" text-anchor="middle">ログインする人（プリンシパル）</text>
+
+  <!-- 請求先アカウント -->
+  <rect class="d-note" x="290" y="20" width="250" height="144" rx="10"/>
+  <text class="d-t d-b" x="415" y="48" text-anchor="middle">💳 請求先アカウント</text>
+  <text class="d-s" x="415" y="68" text-anchor="middle">Cloud Billing account（リソース）</text>
+  <rect class="d-box" x="310" y="82" width="210" height="62" rx="8"/>
+  <text class="d-s d-b" x="415" y="104" text-anchor="middle">許可ポリシー</text>
+  <text class="d-s" x="415" y="128" text-anchor="middle">alice ＋ roles/billing.admin</text>
+
+  <!-- お支払いプロファイル -->
+  <rect class="d-box" x="620" y="44" width="190" height="96" rx="10"/>
+  <text class="d-t d-b" x="715" y="74" text-anchor="middle">お支払いプロファイル</text>
+  <text class="d-s" x="715" y="98" text-anchor="middle">カード・住所など</text>
+  <text class="d-s" x="715" y="120" text-anchor="middle">Google の各サービスで共通</text>
+
+  <!-- プロジェクト -->
+  <rect class="d-box" x="290" y="220" width="115" height="38" rx="8"/>
+  <text class="d-t" x="347" y="244" text-anchor="middle">プロジェクトA</text>
+  <rect class="d-box" x="425" y="220" width="115" height="38" rx="8"/>
+  <text class="d-t" x="482" y="244" text-anchor="middle">プロジェクトB</text>
+
+  <!-- 矢印（枠のあとに描く） -->
+  <path class="d-line" d="M210,113 L306,113" marker-end="url(#arr)"/>
+  <text class="d-s" x="250" y="104" text-anchor="middle">ロールを付与</text>
+  <path class="d-line" d="M540,92 L616,92" marker-end="url(#arr)"/>
+  <text class="d-s" x="580" y="84" text-anchor="middle">支払いに使う</text>
+  <path class="d-line d-dashed" d="M385,164 L355,216" marker-end="url(#arr)"/>
+  <path class="d-line d-dashed" d="M445,164 L475,216" marker-end="url(#arr)"/>
+  <text class="d-s" x="492" y="196">紐付けたプロジェクトの費用を払う</text>
+</svg>
+<figcaption>図6：Google アカウント、請求先アカウント、お支払いプロファイルの関係</figcaption>
+</figure>
+
+<ul>
+  <li>Google アカウントと請求先アカウントは<strong>同じものではありません</strong>。Google アカウント（プリンシパル）が、請求先アカウント（リソース）の許可ポリシーでロールを持つ、という関係です。#2 IAM で扱う「誰に・何を・どこで」と同じ形です</li>
+  <li>会社では、社員の Google アカウント（<code>user:</code>）や Google グループ（<code>group:</code>）に、請求先アカウントのロールを付与します。たとえば経理の担当者には管理者のロールを付与する、といった形です</li>
+  <li>実際にお金を払う手段（カードなど）を持っているのは、お支払いプロファイルです。請求先アカウントは、どのプロジェクトの費用をどのお支払いプロファイルで払うかをまとめるものです</li>
+</ul>
+
+<div class="callout">
+<strong>請求先アカウントは「サービスのリソース」ではない</strong>
+公式ドキュメントでは、サービスのリソースは「プロジェクトの中にあるもの」（Compute Engine の VM や Cloud Storage のバケットなど）です。請求先アカウントはプロジェクトの中にはありません。公式ドキュメントでは階層の分類名は付けられておらず、そのまま「請求先アカウント（Cloud Billing account）」と呼ばれています。
+</div>
+
+<h3>4-2. 階層の中での位置</h3>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 310" role="img" aria-labelledby="f7-title">
+  <title id="f7-title">請求先アカウントは組織が所有でき、組織の IAM ロールが継承される。プロジェクトとは紐付けでつながるだけで、IAM の親子ではない</title>
+  <text class="d-s d-b" x="150" y="18" text-anchor="middle">リソース階層（IAM・組織ポリシーが流れる）</text>
+  <path class="d-line" d="M150,64 L80,100 M150,64 L220,100 M80,136 L80,180 M220,136 L220,180"/>
+  <rect class="d-accent" x="60" y="26" width="180" height="38" rx="8"/>
+  <text class="d-t" x="150" y="51" text-anchor="middle">組織</text>
+  <rect class="d-box" x="20" y="100" width="120" height="36" rx="8"/>
+  <text class="d-t" x="80" y="124" text-anchor="middle">📁 本番</text>
+  <rect class="d-box" x="160" y="100" width="120" height="36" rx="8"/>
+  <text class="d-t" x="220" y="124" text-anchor="middle">📁 開発</text>
+  <rect class="d-box" x="20" y="180" width="120" height="36" rx="8"/>
+  <text class="d-t" x="80" y="204" text-anchor="middle">myapp-prod</text>
+  <rect class="d-box" x="160" y="180" width="120" height="36" rx="8"/>
+  <text class="d-t" x="220" y="204" text-anchor="middle">myapp-dev</text>
+
+  <!-- 請求先アカウント -->
+  <rect class="d-note" x="500" y="110" width="300" height="56" rx="10"/>
+  <text class="d-t d-b" x="650" y="134" text-anchor="middle">💳 請求先アカウント</text>
+  <text class="d-s" x="650" y="155" text-anchor="middle">プロジェクトの親ではない（IAM の継承なし）</text>
+
+  <!-- 所有（組織 → 請求先アカウント） -->
+  <path class="d-line" d="M240,45 L650,45 L650,106" marker-end="url(#arr)"/>
+  <text class="d-s" x="445" y="37" text-anchor="middle">所有（組織の課金のロールが継承される）</text>
+
+  <!-- 紐付け（請求先アカウント → プロジェクト） -->
+  <path class="d-line d-dashed" d="M496,152 L284,198" marker-end="url(#arr)"/>
+  <path class="d-line d-dashed" d="M650,166 L650,256 L80,256 L80,220" marker-end="url(#arr)"/>
+  <text class="d-s" x="400" y="166" text-anchor="middle">紐付け</text>
+  <text class="d-s" x="400" y="248" text-anchor="middle">紐付け</text>
+
+  <!-- 凡例 -->
+  <line class="d-line" x1="20" y1="290" x2="60" y2="290"/>
+  <text class="d-s" x="68" y="294">所有（IAM の継承あり）</text>
+  <line class="d-line d-dashed" x1="250" y1="290" x2="290" y2="290"/>
+  <text class="d-s" x="298" y="294">紐付け（支払いの関係。IAM の継承なし）</text>
+</svg>
+<figcaption>図7：請求先アカウントは組織が所有できるが、プロジェクトとは「紐付け」でつながるだけ</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th></th><th>親（IAM の継承元）</th><th>プロジェクトとの関係</th></tr></thead>
+  <tbody>
+    <tr><td>サービスのリソース</td><td>プロジェクト</td><td>プロジェクトの中にある</td></tr>
+    <tr><td>請求先アカウント</td><td>組織。組織がない個人アカウントでは親なし</td><td>紐付けて費用を払うだけ。親子ではない</td></tr>
+  </tbody>
+</table>
+</div>
+
+<ul>
+  <li>請求先アカウントは<strong>1つの組織</strong>が所有します。組織で付与した課金のロールは、その組織が所有する請求先アカウントにも継承されます</li>
+  <li>請求先アカウントは、<strong>IAM の意味ではプロジェクトの親ではありません</strong>。そのため、請求先アカウントで付与したロールはプロジェクトには継承されません</li>
+  <li>紐付けは組織の所有とは関係がありません。ほかの組織のプロジェクトの費用を払うこともできます</li>
+  <li>1つのプロジェクトが紐付けられる請求先アカウントは<strong>1つだけ</strong>です</li>
+  <li>1つの請求先アカウントには<strong>複数のプロジェクト</strong>を紐付けられます。ただし、紐付けられる数には上限（割り当て）があります</li>
+  <li>請求先アカウントを紐付けていないプロジェクトでは、Compute Engine など課金が必要なサービスを使えません</li>
+</ul>
+
+<h3>4-3. 紐付けに必要な権限</h3>
+<p>プロジェクトを請求先アカウントに紐付ける操作は、2つのリソースにまたがります。そのため、紐付けを行う人は、<strong>両方のリソースの許可ポリシーで</strong>ロールを持っている必要があります。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 270" role="img" aria-labelledby="f8-title">
+  <title id="f8-title">紐付けを行う人は、請求先アカウントの許可ポリシーで roles/billing.user を、プロジェクトの許可ポリシーで roles/billing.projectManager を持つ必要がある</title>
+  <rect class="d-box" x="300" y="14" width="220" height="44" rx="10"/>
+  <text class="d-t" x="410" y="42" text-anchor="middle">👤 user:alice@example.com</text>
+
+  <rect class="d-note" x="20" y="110" width="340" height="110" rx="10"/>
+  <text class="d-t d-b" x="190" y="138" text-anchor="middle">💳 請求先アカウント</text>
+  <rect class="d-box" x="40" y="152" width="300" height="52" rx="8"/>
+  <text class="d-s d-b" x="190" y="172" text-anchor="middle">許可ポリシー</text>
+  <text class="d-s" x="190" y="193" text-anchor="middle">alice ＋ roles/billing.user</text>
+
+  <rect class="d-box" x="460" y="110" width="340" height="110" rx="10"/>
+  <text class="d-t d-b" x="630" y="138" text-anchor="middle">プロジェクト</text>
+  <rect class="d-box" x="480" y="152" width="300" height="52" rx="8"/>
+  <text class="d-s d-b" x="630" y="172" text-anchor="middle">許可ポリシー</text>
+  <text class="d-s" x="630" y="193" text-anchor="middle">alice ＋ roles/billing.projectManager</text>
+
+  <!-- 矢印（枠のあとに描く） -->
+  <path class="d-line" d="M370,58 L230,106" marker-end="url(#arr)"/>
+  <path class="d-line" d="M450,58 L590,106" marker-end="url(#arr)"/>
+  <path class="d-line d-dashed" d="M360,132 L456,132" marker-end="url(#arr)"/>
+  <text class="d-s" x="410" y="124" text-anchor="middle">紐付け</text>
+
+  <text class="d-s" x="410" y="252" text-anchor="middle">紐付けを行う人は、両方のリソースの許可ポリシーでロールを持つ必要がある</text>
+</svg>
+<figcaption>図8：紐付けには、請求先アカウントとプロジェクトの両方の許可が必要</figcaption>
+</figure>
+
+<ul>
+  <li>請求先アカウントの許可ポリシー：<code>roles/billing.user</code>（Billing Account User）。「この請求先アカウントにプロジェクトを紐付けてよい」という権限</li>
+  <li>プロジェクトの許可ポリシー：<code>roles/billing.projectManager</code>（Project Billing Manager）。「このプロジェクトの紐付けを変えてよい」という権限。プロジェクトのオーナー（<code>roles/owner</code>）はこの権限を含む</li>
+  <li>ここでのプリンシパル（alice）は<strong>操作する人</strong>で、お金を払う人ではありません。払うのは請求先アカウントにつながったお支払いプロファイルです</li>
+</ul>
+
+<p>課金の主な事前定義ロールは次のとおりです。</p>
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th>ロール</th><th>できること</th><th>付与できる場所</th></tr></thead>
+  <tbody>
+    <tr><td><code>roles/billing.creator</code><br>Billing Account Creator</td><td>新しい請求先アカウント（セルフサービス）を作る</td><td>組織だけ</td></tr>
+    <tr><td><code>roles/billing.admin</code><br>Billing Account Administrator</td><td>請求先アカウントを管理する（作成はできない）。プロジェクトの紐付けと解除もできる</td><td>組織、請求先アカウント</td></tr>
+    <tr><td><code>roles/billing.user</code><br>Billing Account User</td><td>プロジェクトを請求先アカウントに紐付ける</td><td>組織、請求先アカウント</td></tr>
+    <tr><td><code>roles/billing.costsManager</code><br>Billing Account Costs Manager</td><td>予算を管理し、費用の情報を見たりエクスポートしたりする</td><td>組織、請求先アカウント</td></tr>
+    <tr><td><code>roles/billing.viewer</code><br>Billing Account Viewer</td><td>費用や支払いの情報を見る</td><td>組織、請求先アカウント</td></tr>
+    <tr><td><code>roles/billing.projectManager</code><br>Project Billing Manager</td><td>プロジェクトの紐付けと解除</td><td>組織、フォルダ、プロジェクト</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout ace">
+<strong>ACE のポイント</strong>
+<ul>
+  <li>「プロジェクトを請求先アカウントに紐付けられない」という問題では、<strong>請求先アカウントの <code>roles/billing.user</code></strong> と、<strong>プロジェクトの <code>roles/billing.projectManager</code>（またはオーナー）</strong>の両方がそろっているかを確認する</li>
+  <li><code>roles/billing.admin</code> でも請求先アカウントは作れない。作るには組織の <code>roles/billing.creator</code> が必要</li>
+  <li>請求先アカウントはプロジェクトの親ではないので、請求先アカウントで付与したロールはプロジェクトに継承されない</li>
+</ul>
+</div>
+
+<div class="callout">
+<strong>予算アラートは「通知」だけ</strong>
+予算アラートはしきい値を超えると通知を送りますが、<strong>課金を止めるわけではありません。</strong>しきい値には、実際の支出（<code>CURRENT_SPEND</code>）と、月末までの予測額（<code>FORECASTED_SPEND</code>）のどちらも使えます。予測額を使うと、超えそうになった時点で事前に気づけます。
+</div>
+
+<!-- ============================================================ -->
+<h2>5. 個人アカウントと業務環境の違い</h2>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 230" role="img" aria-labelledby="f9-title">
+  <title id="f9-title">個人アカウントでは組織もフォルダもなくプロジェクトが最上位。業務環境では組織、フォルダ、プロジェクトの順に並ぶ</title>
+  <rect class="d-box d-dashed" x="10" y="10" width="390" height="210" rx="12"/>
+  <text class="d-t d-b" x="205" y="40" text-anchor="middle">個人アカウント（Gmail）</text>
+  <rect class="d-box" x="25" y="90" width="110" height="38" rx="8"/>
+  <text class="d-s" x="80" y="114" text-anchor="middle">project-a</text>
+  <rect class="d-box" x="150" y="90" width="110" height="38" rx="8"/>
+  <text class="d-s" x="205" y="114" text-anchor="middle">project-b</text>
+  <rect class="d-box" x="275" y="90" width="110" height="38" rx="8"/>
+  <text class="d-s" x="330" y="114" text-anchor="middle">project-c</text>
+  <text class="d-s" x="205" y="172" text-anchor="middle">組織もフォルダもない</text>
+  <text class="d-s" x="205" y="192" text-anchor="middle">プロジェクトが最上位（親なし）</text>
+
+  <rect class="d-box" x="420" y="10" width="390" height="210" rx="12"/>
+  <text class="d-t d-b" x="615" y="40" text-anchor="middle">業務環境（組織あり）</text>
+  <path class="d-line" d="M615,88 L615,112 M615,144 L615,168"/>
+  <rect class="d-accent" x="535" y="56" width="160" height="32" rx="8"/>
+  <text class="d-s" x="615" y="77" text-anchor="middle">組織</text>
+  <rect class="d-box" x="535" y="112" width="160" height="32" rx="8"/>
+  <text class="d-s" x="615" y="133" text-anchor="middle">📁 フォルダ</text>
+  <rect class="d-box" x="535" y="168" width="160" height="32" rx="8"/>
+  <text class="d-s" x="615" y="189" text-anchor="middle">プロジェクト</text>
+</svg>
+<figcaption>図9：個人の学習環境と、参画先の環境の違い</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th></th><th>個人アカウント</th><th>業務環境（一般的なケース）</th></tr></thead>
+  <tbody>
+    <tr><td>組織</td><td>なし</td><td>あり</td></tr>
+    <tr><td>プロジェクトの親</td><td>なし</td><td>組織またはフォルダ</td></tr>
+    <tr><td>自分の権限</td><td>自分がオーナー</td><td>管理者に付与された分だけ</td></tr>
+    <tr><td>組織ポリシー</td><td>使えない</td><td>組織全体のルールがかかっていることが多い</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout lead-tip">
+<strong>テックリードの視点：参画初日に確認したいこと</strong>
+<ul class="check">
+  <li>組織とフォルダの構成。環境（本番・ステージング・開発）ごとにプロジェクトが分かれているか</li>
+  <li>オーナーや編集者のロールを誰が持っているか。開発メンバーにどの階層で、どのロールが付いているか</li>
+  <li>適用されている組織ポリシー</li>
+  <li>どの請求先アカウントで費用を払っているか。その請求先アカウントの管理者は誰か</li>
+  <li>予算アラートが設定されているか。誰に通知が届くか</li>
+  <li>本番のプロジェクトを操作するときのルール（誰が、どんな手順で操作するか）</li>
+</ul>
+</div>
+
+<!-- ============================================================ -->
+<h2>6. ハンズオン：自分の環境を読み取る</h2>
+<p>学習用のターミナル（学習用の configuration を有効にしたもの）で実行します。<strong>どれも読み取りだけで、何も変更しません。</strong><code>PROJECT_ID</code> は自分の学習用プロジェクトの ID に置き換えてください。</p>
+
+<pre><code># ① 自分がアクセスできる組織を一覧する
+gcloud organizations list
+
+# ② プロジェクトの「先祖」（上の階層）を表示する
+gcloud projects get-ancestors PROJECT_ID
+
+# ③ プロジェクトの IAM 許可ポリシーを表示する
+gcloud projects get-iam-policy PROJECT_ID
+
+# ④ 自分がアクセスできる請求先アカウントを一覧する
+gcloud billing accounts list
+
+# ⑤ 請求先アカウントの親と、許可ポリシーを表示する
+gcloud billing accounts describe BILLING_ACCOUNT_ID
+gcloud billing accounts get-iam-policy BILLING_ACCOUNT_ID</code></pre>
+<p><code>BILLING_ACCOUNT_ID</code> は、④で表示される <code>ACCOUNT_ID</code> に置き換えてください。</p>
+
+<div class="quiz">
+<p class="q">Q1. ①と②の結果から、このプロジェクトの階層はどうなっていると言えるでしょう？</p>
+<details><summary>答えを見る</summary>
+<p>①は <code>Listed 0 items.</code> で、アクセスできる組織がありません。②にはプロジェクト自身の1行しか出ません。つまり、<strong>組織もフォルダもなく、プロジェクトが最上位</strong>です（図9の左側）。Gmail の個人アカウントには組織リソースがないためで、これは正常です。</p>
+</details>
+
+<p class="q">Q2. ③の結果で、誰がどのロールを持っているでしょう？</p>
+<details><summary>答えを見る</summary>
+<p>プロジェクトを作った自分のアカウントが <code>roles/owner</code>（オーナー）を持っています。オーナーは、プロジェクトのすべてを操作でき、IAM も変更できる最も強いロールです。</p>
+<p>オーナー、編集者、閲覧者は「従来の基本ロール」と呼ばれます（新しい基本ロールとして、管理者・書き込み・読み取りもあります）。どれも範囲がとても広いので、本番環境ではなるべく使いません。詳しくは #2 IAM で扱います。</p>
+</details>
+
+<p class="q">Q3. 参画先のプロジェクトで②を実行したら、どんな結果になりそうでしょう？</p>
+<details><summary>答えを見る</summary>
+<p>プロジェクトの上に、フォルダ（1つ以上）と組織が並ぶはずです。たとえば次のような形です。</p>
+<pre><code>ID              TYPE
+myapp-prod      project
+123456789012    folder
+987654321098    organization</code></pre>
+<p>業務環境では、<code>gcloud projects get-ancestors-iam-policy PROJECT_ID</code> を使うと、上の階層すべての IAM ポリシーをまとめて確認できます。「この権限はどこから引き継がれているのか」を調べるときに便利です。</p>
+</details>
+
+<p class="q">Q4. ⑤の結果から、請求先アカウントについて何が分かるでしょう？</p>
+<details><summary>答えを見る</summary>
+<p>次のような結果になります（ID とメールアドレスは例）。</p>
+<pre><code>$ gcloud billing accounts describe XXXXXX-XXXXXX-XXXXXX
+currencyCode: JPY
+displayName: 請求先アカウント
+name: billingAccounts/XXXXXX-XXXXXX-XXXXXX
+open: true
+parent: ''
+
+$ gcloud billing accounts get-iam-policy XXXXXX-XXXXXX-XXXXXX
+bindings:
+- members:
+  - user:alice@example.com
+  role: roles/billing.admin</code></pre>
+<ul>
+  <li><code>parent: ''</code>：親がない。個人アカウントには組織がないため（図7の「所有」の線がない状態）。業務環境では <code>parent: organizations/…</code> のように組織が表示される</li>
+  <li><code>get-iam-policy</code>：これが<strong>請求先アカウントというリソースの許可ポリシー</strong>。自分の Google アカウントが、管理者のロール（<code>roles/billing.admin</code>）を持っている。プロジェクトの <code>get-iam-policy</code>（③）と同じ形をしている</li>
+</ul>
+</details>
+</div>
+
+<!-- ============================================================ -->
+<h2>7. 確認テスト（ACE 形式）</h2>
+<div class="quiz">
+
+<p class="q">問1. 開発チーム（Google グループ）に、開発用の3つのプロジェクトすべてで Compute Engine を管理させたい。開発用のプロジェクトは今後も増える予定です。最も運用の手間が少ない方法はどれでしょう？</p>
+<ol class="choices">
+  <li>各プロジェクトで、チームのメンバー一人ひとりに <code>roles/compute.admin</code> を付与する</li>
+  <li>3つのプロジェクトを「開発」フォルダにまとめ、フォルダでグループに <code>roles/compute.admin</code> を付与する</li>
+  <li>組織でグループに <code>roles/owner</code> を付与する</li>
+  <li>各プロジェクトで、グループに <code>roles/editor</code> を付与する</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>フォルダで付与すると、配下のプロジェクトすべてに引き継がれます。新しいプロジェクトもフォルダに入れるだけで権限が付きます。また、個人ではなくグループに付与すれば、メンバーの増減はグループ側で管理できます。</p>
+<p>A は、プロジェクトやメンバーが増えるたびに作業が必要です。C は権限が広すぎます（本番も含めた全体のオーナーになってしまう）。D は、プロジェクトごとの作業が必要なうえ、基本ロールで権限が広すぎます。</p>
+</details>
+
+<p class="q">問2. ユーザー A は、フォルダ「開発」で <code>roles/editor</code> を持っています。配下のプロジェクト myapp-stg だけは、A に変更させたくありません。適切な方法はどれでしょう？</p>
+<ol class="choices">
+  <li>myapp-stg の許可ポリシーで、A に <code>roles/viewer</code> を付与する</li>
+  <li>myapp-stg に IAM 拒否ポリシーを設定し、A に対して該当する権限を拒否する</li>
+  <li>組織ポリシーで、A が myapp-stg を変更できないようにする</li>
+  <li>myapp-stg の許可ポリシーから、A の <code>roles/editor</code> を削除する</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>許可ポリシーは足し算なので、A に閲覧者を付与しても（A）、フォルダから引き継いだ編集者の権限は残ります。D の <code>roles/editor</code> はフォルダで付与されたものなので、myapp-stg のポリシーにはそもそも書かれていません。C の組織ポリシーは「どんな設定を許すか」を決めるもので、特定の人を対象にはできません。</p>
+<p>拒否ポリシーのほかに、「A への付与をフォルダではなく、必要なプロジェクトごとに行う」ように見直すのも有効です。</p>
+</details>
+
+<p class="q">問3. 会社のすべてのプロジェクトで、東京と大阪以外のリージョンにリソースを作れないようにしたい。どうすればよいでしょう？</p>
+<ol class="choices">
+  <li>各プロジェクトの IAM で、ほかのリージョンへのアクセスを拒否する</li>
+  <li>組織で、組織ポリシーの制約 <code>constraints/gcp.resourceLocations</code> を設定する</li>
+  <li>全員に、gcloud の <code>compute/region</code> を <code>asia-northeast1</code> に設定するよう周知する</li>
+  <li>予算アラートで、ほかのリージョンでの支出を検知する</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>「どんな設定を許すか」は組織ポリシーの役割です。組織で設定すれば、配下のすべてのプロジェクトに引き継がれます。</p>
+<p>C の <code>compute/region</code> は、手元の gcloud で<strong>リージョンを省略したときの既定値</strong>にすぎず、強制力はありません（#0 で設定したものです）。D は事後に気づくだけで、作成を防げません。</p>
+</details>
+
+<p class="q">問4. 新しく作ったプロジェクトで Compute Engine API を有効にしようとしたところ、失敗しました。最も可能性が高い原因はどれでしょう？</p>
+<ol class="choices">
+  <li>プロジェクトに請求先アカウントが紐付いていない</li>
+  <li>プロジェクトが組織に属していない</li>
+  <li>gcloud にリージョンを設定していない</li>
+  <li>プロジェクト名が、ほかのプロジェクトと重複している</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：A</strong></p>
+<p>Compute Engine は課金が必要なサービスなので、請求先アカウントを紐付けないと有効にできません。B の組織がなくてもプロジェクトは使えます（個人アカウントがその例です）。D のプロジェクト名（表示名）は重複してもかまいません。一意である必要があるのはプロジェクト ID です。</p>
+</details>
+
+<p class="q">問5. 開発者 X は、新しく作ったプロジェクト myapp-sandbox のオーナーです。このプロジェクトを会社の請求先アカウントに紐付けようとしたところ、権限が足りずに失敗しました。最小限の権限で紐付けられるようにするには、どうすればよいでしょう？</p>
+<ol class="choices">
+  <li>請求先アカウントの許可ポリシーで、X に <code>roles/billing.user</code> を付与する</li>
+  <li>myapp-sandbox の許可ポリシーで、X に <code>roles/billing.projectManager</code> を付与する</li>
+  <li>組織の許可ポリシーで、X に <code>roles/billing.admin</code> を付与する</li>
+  <li>請求先アカウントの許可ポリシーで、X に <code>roles/billing.viewer</code> を付与する</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：A</strong></p>
+<p>紐付けには、請求先アカウントとプロジェクトの両方の許可が必要です（図8）。X はプロジェクトのオーナーなので、プロジェクト側の権限（<code>roles/billing.projectManager</code> が含む権限）はすでに持っています。足りないのは請求先アカウント側の <code>roles/billing.user</code> です。</p>
+<p>B は、X がすでに持っている権限なので効果がありません。C は、組織が所有するすべての請求先アカウントの管理者になってしまい、権限が広すぎます。D は閲覧だけなので紐付けられません。</p>
+</details>
+
+<p class="q">問6. 組織ポリシーについて、正しいものはどれでしょう？</p>
+<ol class="choices">
+  <li>名前のとおり、組織にしか設定できない</li>
+  <li>組織だけでなく、フォルダやプロジェクトにも設定できる</li>
+  <li>特定のユーザーやグループを対象に、操作を制限できる</li>
+  <li>Cloud Storage のバケットなど、個々のサービスのリソースに直接設定できる</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>「組織ポリシー」は仕組みの名前で、組織・フォルダ・プロジェクトのどれにも設定できます（図4）。C のように「誰に対して」を決めるのは IAM の役割です。D のサービスのリソースには組織ポリシーを直接設定できませんが、上の階層から引き継いだ制約は適用されます。</p>
+</details>
+</div>
+
+<!-- ============================================================ -->
+<h2>まとめ</h2>
+<ul>
+  <li>階層は「組織 → フォルダ → プロジェクト → サービスのリソース」。サービスのリソースは必ず1つのプロジェクトに属する</li>
+  <li>IAM の許可ポリシーは上から引き継がれ、合計で効く（足し算）。下の階層の許可ポリシーでは取り消せない。引き算は拒否ポリシーで行い、拒否は許可より優先される</li>
+  <li>IAM は「誰が」、組織ポリシーは「どんな設定を」を決める。組織・フォルダ・プロジェクトのどれにも両方を設定でき、どちらも上から引き継がれる</li>
+  <li>操作が成功するのは、IAM と組織ポリシーの両方の条件を満たしたときだけ</li>
+  <li>請求先アカウントはログインするアカウントではなく、リソースの一つ。組織が所有でき、組織の課金のロールが継承される。プロジェクトとは紐付け（支払いの関係）でつながるだけで、IAM の親子ではない</li>
+  <li>紐付けには、請求先アカウントの許可ポリシーで <code>roles/billing.user</code>、プロジェクトの許可ポリシーで <code>roles/billing.projectManager</code>（またはオーナー）が必要。予算アラートは通知だけ</li>
+</ul>
+<p>次回：<a href="02-iam.html"><strong>#2 IAM</strong></a>（プリンシパル、ロールの種類、サービスアカウント、最小権限）</p>
+
+<footer><a href="../index.html">← ロードマップに戻る</a>　｜　最終更新：2026-11-19</footer>
+</main>
+</body>
+</html>

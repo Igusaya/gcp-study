@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GCP 学習ロードマップ</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<main>
+
+<h1>GCP 学習ロードマップ</h1>
+<p class="lead">目標：Associate Cloud Engineer（ACE）の合格と、実務で GCP を使ったプロジェクトをリードできるようになること</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 960 290" role="img" aria-labelledby="rm-title">
+  <title id="rm-title">学習ロードマップ：Phase 1 参画前の土台づくり（8トピック）、Phase 2 参画後、Phase 3 ACE仕上げ</title>
+  <!-- フェーズの帯 -->
+  <rect class="d-band" x="10" y="16" width="476" height="258" rx="12"/>
+  <rect class="d-band" x="496" y="16" width="220" height="258" rx="12"/>
+  <rect class="d-band" x="726" y="16" width="224" height="258" rx="12"/>
+  <text class="d-t d-b" x="248" y="46" text-anchor="middle">Phase 1　参画前の土台づくり</text>
+  <text class="d-t d-b" x="606" y="46" text-anchor="middle">Phase 2　参画後</text>
+  <text class="d-t d-b" x="838" y="46" text-anchor="middle">Phase 3　ACE仕上げ</text>
+
+  <!-- 全体をつなぐ線 -->
+  <line class="d-line" x1="50" y1="150" x2="910" y2="150"/>
+
+  <!-- Phase 1 のノード（偶数は上、奇数は下にラベル） -->
+  <a href="#t0"><circle class="node-done" cx="50" cy="150" r="13"/></a>
+  <text class="d-on-accent" x="50" y="154" text-anchor="middle">0</text>
+  <text class="d-t" x="50" y="118" text-anchor="middle">環境準備</text>
+
+  <a href="lessons/01-resource-hierarchy.html"><circle class="node-done" cx="108" cy="150" r="13"/></a>
+  <text class="d-on-accent" x="108" y="154" text-anchor="middle">1</text>
+  <text class="d-t" x="108" y="192" text-anchor="middle">階層と課金</text>
+
+  <a href="lessons/02-iam.html"><circle class="node-done" cx="166" cy="150" r="13"/></a>
+  <text class="d-on-accent" x="166" y="154" text-anchor="middle">2</text>
+  <text class="d-t" x="166" y="118" text-anchor="middle">IAM</text>
+
+  <a href="lessons/03-network.html"><circle class="node-done" cx="224" cy="150" r="13"/></a>
+  <text class="d-on-accent" x="224" y="154" text-anchor="middle">3</text>
+  <text class="d-t" x="224" y="192" text-anchor="middle">ネットワーク</text>
+
+  <a href="lessons/04-compute-options.html"><circle class="node-current" cx="282" cy="150" r="13"/></a>
+  <text class="d-t d-b" x="282" y="155" text-anchor="middle">4</text>
+  <text class="d-t d-b d-c-accent" x="282" y="118" text-anchor="middle">実行環境</text>
+
+  <circle class="node-todo" cx="340" cy="150" r="13"/>
+  <text class="d-t" x="340" y="155" text-anchor="middle">5</text>
+  <text class="d-t" x="340" y="192" text-anchor="middle">Cloud Run</text>
+
+  <circle class="node-todo" cx="398" cy="150" r="13"/>
+  <text class="d-t" x="398" y="155" text-anchor="middle">6</text>
+  <text class="d-t" x="398" y="118" text-anchor="middle">データ</text>
+
+  <circle class="node-todo" cx="456" cy="150" r="13"/>
+  <text class="d-t" x="456" y="155" text-anchor="middle">7</text>
+  <text class="d-t" x="456" y="192" text-anchor="middle">運用</text>
+
+  <!-- Phase 2 -->
+  <rect class="d-box" x="521" y="128" width="170" height="44" rx="22"/>
+  <text class="d-t" x="606" y="155" text-anchor="middle">使う技術を優先</text>
+  <text class="d-s" x="606" y="200" text-anchor="middle">＋ ACE 範囲の穴埋め</text>
+  <text class="d-s" x="606" y="222" text-anchor="middle">内容は参画後に決める</text>
+
+  <!-- Phase 3 -->
+  <circle class="node-todo" cx="770" cy="150" r="13"/>
+  <text class="d-t" x="770" y="118" text-anchor="middle">サンプル問題</text>
+  <circle class="node-todo" cx="838" cy="150" r="13"/>
+  <text class="d-t" x="838" y="192" text-anchor="middle">模擬試験</text>
+  <circle class="node-todo" cx="906" cy="150" r="13"/>
+  <text class="d-t d-b" x="906" y="118" text-anchor="middle">受験</text>
+
+  <!-- 凡例 -->
+  <circle class="node-done" cx="40" cy="250" r="8"/>
+  <text class="d-s" x="54" y="254">完了</text>
+  <circle class="node-current" cx="110" cy="250" r="8"/>
+  <text class="d-s" x="124" y="254">学習中</text>
+  <circle class="node-todo" cx="190" cy="250" r="8"/>
+  <text class="d-s" x="204" y="254">未着手</text>
+</svg>
+<figcaption>当日の可処分時間に合わせて、Phase 1 を上から順に進める</figcaption>
+</figure>
+
+<h2>Phase 1　参画前の土台づくり</h2>
+<p>実務の会話についていくための土台を、短期間で固めるフェーズです。ここで扱う内容は、ACE の中心範囲とも大きく重なります。</p>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>#</th><th>トピック</th><th>内容</th><th>主な ACE 分野</th><th>状態</th></tr>
+  </thead>
+  <tbody>
+    <tr id="t0">
+      <td>0</td><td>環境準備</td>
+      <td>gcloud の configuration、学習用プロジェクト、予算アラート</td>
+      <td>1. 環境のセットアップ</td>
+      <td><span class="badge done">完了</span></td>
+    </tr>
+    <tr>
+      <td>1</td><td><a href="lessons/01-resource-hierarchy.html">リソース階層と課金</a></td>
+      <td>組織・フォルダ・プロジェクト、IAM の継承、組織ポリシー、請求先アカウント</td>
+      <td>1. 環境のセットアップ</td>
+      <td><span class="badge done">完了</span></td>
+    </tr>
+    <tr>
+      <td>2</td><td><a href="lessons/02-iam.html">IAM</a></td>
+      <td>プリンシパル・ロール・許可ポリシーと拒否ポリシー、サービスアカウント、最小権限</td>
+      <td>4. アクセスとセキュリティ</td>
+      <td><span class="badge done">完了</span></td>
+    </tr>
+    <tr>
+      <td>3</td><td><a href="lessons/03-network.html">ネットワーク基礎</a></td>
+      <td>VPC ネットワーク、サブネット、ファイアウォール ルール、外部 IP・内部 IP、Cloud NAT、IAP、共有 VPC</td>
+      <td>2. 計画と実装</td>
+      <td><span class="badge done">完了</span></td>
+    </tr>
+    <tr>
+      <td>4</td><td><a href="lessons/04-compute-options.html">実行環境の選び方</a></td>
+      <td>Compute Engine / GKE / Cloud Run / Cloud Run functions / App Engine の使い分け、Spot VM、マネージド インスタンス グループ</td>
+      <td>2. 計画と実装</td>
+      <td><span class="badge current">学習中</span></td>
+    </tr>
+    <tr>
+      <td>5</td><td>Cloud Run ハンズオン</td>
+      <td>コンテナのビルドとデプロイ、Artifact Registry</td>
+      <td>2. 計画と実装</td>
+      <td><span class="badge todo">未着手</span></td>
+    </tr>
+    <tr>
+      <td>6</td><td>データストア概観</td>
+      <td>Cloud SQL / Firestore / Cloud Storage / BigQuery の使い分け</td>
+      <td>2. 計画と実装</td>
+      <td><span class="badge todo">未着手</span></td>
+    </tr>
+    <tr>
+      <td>7</td><td>運用</td>
+      <td>Cloud Logging / Cloud Monitoring、エラー調査の基本</td>
+      <td>3. 運用の確保</td>
+      <td><span class="badge todo">未着手</span></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Phase 2　参画後</h2>
+<ul>
+  <li>プロジェクトで使っているサービスを優先して学ぶ。教材の内容は参画後に組み直す</li>
+  <li>並行して、Phase 1 でカバーしきれなかった ACE の範囲を補う</li>
+</ul>
+
+<h2>Phase 3　ACE 仕上げ</h2>
+<ul>
+  <li>公式のサンプル問題を解き、出題形式に慣れる</li>
+  <li>模擬試験で弱点を洗い出し、補強する</li>
+  <li>受験する</li>
+</ul>
+
+<h2>ACE 試験の概要</h2>
+<div class="card">
+<div class="table-wrap">
+<table>
+  <tbody>
+    <tr><th>試験時間</th><td>2時間</td></tr>
+    <tr><th>問題数・形式</th><td>50〜60問。単一選択と複数選択</td></tr>
+    <tr><th>言語</th><td>日本語で受験できる（ほかに英語、スペイン語、ポルトガル語）</td></tr>
+    <tr><th>受験料</th><td>125米ドル（税別）</td></tr>
+    <tr><th>受験方法</th><td>オンライン監視型、またはテストセンター</td></tr>
+    <tr><th>有効期間</th><td>3年</td></tr>
+    <tr><th>推奨経験</th><td>GCP の実務経験 6か月以上（受験資格の条件ではない）</td></tr>
+  </tbody>
+</table>
+</div>
+<p><strong>出題分野（4つ）</strong></p>
+<ol>
+  <li>クラウド ソリューション環境のセットアップ（Set up a cloud solution environment）</li>
+  <li>クラウド ソリューションの計画と実装（Plan and implement a cloud solution）</li>
+  <li>クラウド ソリューションの運用の確保（Ensure successful operation of a cloud solution）</li>
+  <li>アクセスとセキュリティの構成（Configure access and security）</li>
+</ol>
+<p class="lead">分野ごとの配分と詳しい出題範囲は、公式の試験ガイドを確認する。上の情報は 2026-11-18 時点の公式ページによる。</p>
+<ul>
+  <li><a href="https://cloud.google.com/learn/certification/cloud-engineer">Associate Cloud Engineer 公式ページ</a></li>
+  <li><a href="https://services.google.com/fh/files/misc/associate_cloud_engineer_exam_guide_english.pdf">試験ガイド（PDF・英語）</a></li>
+  <li><a href="https://docs.google.com/forms/d/e/1FAIpQLSfexWKtXT2OSFJ-obA4iT3GmzgiOCGvjrT9OfxilWC1yPtmfQ/viewform">公式サンプル問題</a></li>
+</ul>
+</div>
+
+<footer>最終更新：2026-11-20</footer>
+</main>
+</body>
+</html>

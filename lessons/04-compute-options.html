@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#4 実行環境の選び方 | GCP 学習</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<!-- 矢印の定義（ページ内の全 SVG で共有） -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="d-arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+    <marker id="arr-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="d-arrowhead-ok" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+</svg>
+
+<main>
+<p class="breadcrumb"><a href="../index.html">← ロードマップ</a>　｜　<a href="03-network.html">← #3 ネットワーク基礎</a></p>
+<h1>#4 実行環境の選び方</h1>
+<p class="lead">Compute Engine / GKE / Cloud Run / Cloud Run functions / App Engine の違いを、「自分で管理する範囲」で整理する</p>
+
+<div class="card">
+<strong>この回のゴール</strong>
+<ul>
+  <li>5つの実行環境で、自分で用意・管理するものと Google が管理するものの違いを説明できる</li>
+  <li>要件（既存システムの移行、HTTP の API、イベント処理、Kubernetes など）から実行環境を選べる</li>
+  <li>Compute Engine のマシンタイプ、Spot VM、マネージド インスタンス グループ（MIG）を説明できる</li>
+  <li>GKE の Autopilot モードと Standard モード、App Engine のスタンダード環境とフレキシブル環境の違いを説明できる</li>
+  <li>VM を作成・停止・削除し、停止中も料金がかかるものを説明できる</li>
+</ul>
+</div>
+
+<!-- ============================================================ -->
+<h2>1. 全体像：どこまで自分で管理するか</h2>
+<p>GCP でアプリを動かす場所（実行環境）はいくつもあります。違いは、<strong>自分で用意・管理するものと、Google に任せるものの境目</strong>です。自分で管理する範囲が広いほど自由に設定できますが、手間と責任も増えます。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 340" role="img" aria-labelledby="f1-title">
+  <title id="f1-title">実行環境の全体像：左の Compute Engine ほど自分で管理する範囲が広く、右の Cloud Run functions ほど Google が管理する範囲が広い</title>
+  <!-- 上の軸 -->
+  <text class="d-s d-b" x="20" y="22">自由度が高い・自分で管理する範囲が広い</text>
+  <text class="d-s d-b" x="800" y="22" text-anchor="end">管理の手間が少ない・制約がある</text>
+
+  <!-- 4つの列 -->
+  <rect class="d-box" x="20" y="50" width="180" height="250" rx="10"/>
+  <rect class="d-box" x="220" y="50" width="180" height="250" rx="10"/>
+  <rect class="d-box" x="420" y="50" width="180" height="250" rx="10"/>
+  <rect class="d-box" x="620" y="50" width="180" height="250" rx="10"/>
+
+  <text class="d-t d-b" x="110" y="78" text-anchor="middle">Compute Engine</text>
+  <text class="d-s" x="110" y="98" text-anchor="middle">VM</text>
+  <text class="d-t d-b" x="310" y="78" text-anchor="middle">GKE</text>
+  <text class="d-s" x="310" y="98" text-anchor="middle">Kubernetes</text>
+  <text class="d-t d-b" x="510" y="78" text-anchor="middle">Cloud Run</text>
+  <text class="d-s" x="510" y="98" text-anchor="middle">コンテナ</text>
+  <text class="d-t d-b" x="710" y="78" text-anchor="middle">Cloud Run functions</text>
+  <text class="d-s" x="710" y="98" text-anchor="middle">関数</text>
+
+  <!-- 自分で用意・管理する -->
+  <text class="d-s d-b d-c-warn" x="36" y="130">自分で用意・管理</text>
+  <text class="d-s" x="36" y="152">OS・ミドルウェア</text>
+  <text class="d-s" x="36" y="172">アプリ</text>
+  <text class="d-s" x="36" y="192">VM の台数</text>
+
+  <text class="d-s d-b d-c-warn" x="236" y="130">自分で用意・管理</text>
+  <text class="d-s" x="236" y="152">コンテナ</text>
+  <text class="d-s" x="236" y="172">Kubernetes の設定</text>
+  <text class="d-s" x="236" y="192">ノード（Standard）</text>
+
+  <text class="d-s d-b d-c-warn" x="436" y="130">自分で用意・管理</text>
+  <text class="d-s" x="436" y="152">コンテナ</text>
+  <text class="d-s" x="436" y="172">（ソースコードからも可）</text>
+
+  <text class="d-s d-b d-c-warn" x="636" y="130">自分で用意・管理</text>
+  <text class="d-s" x="636" y="152">関数のコード</text>
+
+  <!-- 区切り -->
+  <path class="d-line d-dashed" d="M32,214 L188,214"/>
+  <path class="d-line d-dashed" d="M232,214 L388,214"/>
+  <path class="d-line d-dashed" d="M432,214 L588,214"/>
+  <path class="d-line d-dashed" d="M632,214 L788,214"/>
+
+  <!-- Google が管理する -->
+  <text class="d-s d-b d-c-ok" x="36" y="238">Google が管理</text>
+  <text class="d-s" x="36" y="260">ハードウェア</text>
+
+  <text class="d-s d-b d-c-ok" x="236" y="238">Google が管理</text>
+  <text class="d-s" x="236" y="260">コントロール プレーン</text>
+  <text class="d-s" x="236" y="280">ノード（Autopilot）</text>
+
+  <text class="d-s d-b d-c-ok" x="436" y="238">Google が管理</text>
+  <text class="d-s" x="436" y="260">サーバー・OS</text>
+  <text class="d-s" x="436" y="280">台数の増減</text>
+
+  <text class="d-s d-b d-c-ok" x="636" y="238">Google が管理</text>
+  <text class="d-s" x="636" y="260">コンテナのビルド</text>
+  <text class="d-s" x="636" y="280">サーバー・台数の増減</text>
+
+  <!-- 軸の矢印（枠のあとに描く） -->
+  <path class="d-line" d="M410,36 L24,36" marker-end="url(#arr)"/>
+  <path class="d-line" d="M410,36 L796,36" marker-end="url(#arr)"/>
+
+  <text class="d-s" x="410" y="328" text-anchor="middle">App Engine は以前からある選択肢。新しく使う場合は Cloud Run が推奨されている（2-5）</text>
+</svg>
+<figcaption>図1：実行環境ごとの、自分で用意・管理するものと Google が管理するもの</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th></th><th>Compute Engine</th><th>GKE</th><th>Cloud Run</th><th>Cloud Run functions</th></tr></thead>
+  <tbody>
+    <tr><td>渡すもの</td><td>VM（OS から自分で用意）</td><td>コンテナと Kubernetes の設定（マニフェスト）</td><td>コンテナ（ソースコードからも作れる）</td><td>関数のコード</td></tr>
+    <tr><td>台数の増減</td><td>MIG で自動スケーリングを設定する（2-1）</td><td>Pod とノードを自動で増減できる</td><td>リクエストなどに応じて自動</td><td>自動</td></tr>
+    <tr><td>0 台まで減るか</td><td>減らない（VM を停止することはできる）</td><td>クラスタは残り、クラスタ管理手数料がかかる</td><td>減る（最小インスタンス数を0にした場合）</td><td>減る</td></tr>
+    <tr><td>課金の単位</td><td>VM が動いている時間（秒単位、最低1分）とディスクなど</td><td>クラスタ管理手数料＋ノードの VM（Standard）または Pod が要求したリソース（Autopilot）</td><td>使った分（既定はリクエストベースの課金）</td><td>Cloud Run と同じ</td></tr>
+    <tr><td>向いているもの</td><td>既存システムの移行、OS の設定が必要なもの</td><td>多数のコンテナを Kubernetes で運用したい</td><td>Web アプリ、API、バッチ</td><td>イベントに反応する小さな処理</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ============================================================ -->
+<h2>2. それぞれの実行環境</h2>
+
+<h3>2-1. Compute Engine：VM（仮想マシン）</h3>
+<p>Compute Engine は、VM（公式ドキュメントでは「インスタンス」とも呼ぶ）を作るサービスです。OS から上はすべて自分で管理します。手間はかかりますが、オンプレミスのサーバーと同じ感覚で何でも動かせます。</p>
+
+<h4>マシンタイプ</h4>
+<p>VM の CPU とメモリの大きさは<strong>マシンタイプ</strong>で決めます。マシンタイプは、<strong>マシン ファミリー</strong>（汎用、コンピューティング最適化など）→ <strong>マシンシリーズ</strong>（E2、N2、C3 など）→ マシンタイプ（<code>e2-standard-2</code> など）の順に分類されています。</p>
+<ul>
+  <li><code>e2-micro</code>、<code>e2-small</code>、<code>e2-medium</code> は<strong>共有コア</strong>のマシンタイプ。物理コアを時間で分け合う小さな VM で、短い時間なら CPU をフルに使える（バースト）。たとえば <code>e2-micro</code> は、2つの vCPU をそれぞれ 12.5% の時間ずつ使える</li>
+  <li>決まった大きさで足りなければ、vCPU とメモリを指定した<strong>カスタム マシンタイプ</strong>も作れる</li>
+</ul>
+
+<h4>Spot VM：安いが、いつ止められてもよい処理向け</h4>
+<p><strong>Spot VM</strong> は、Compute Engine の余っている容量を使う VM です。通常の VM より大幅に安く（多くのマシンタイプで最大 91% 引き）なりますが、Google が容量を必要とすると<strong>いつでも停止または削除（プリエンプト）</strong>されます。</p>
+<ul>
+  <li>途中で止まってもやり直せる処理（バッチ処理、ステートレスなアプリなど）に向いている。止まると困る処理には使わない</li>
+  <li>以前は<strong>プリエンプティブル VM</strong> という仕組みがあった。Spot VM はその新しい版で、プリエンプティブル VM の「最長 24 時間で止まる」という制限がない。公式ドキュメントでは Spot VM を使うよう推奨している</li>
+</ul>
+
+<h4>マネージド インスタンス グループ（MIG）：同じ VM をまとめて運用する</h4>
+<p>同じ構成の VM を複数台まとめて扱う仕組みです。VM の設計図となる<strong>インスタンス テンプレート</strong>から、VM を自動で作ります。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 250" role="img" aria-labelledby="f2-title">
+  <title id="f2-title">インスタンス テンプレートから、リージョン MIG が3つのゾーンに VM を作る。自動スケーリングと自動修復で台数と状態を保つ</title>
+  <rect class="d-accent" x="20" y="80" width="190" height="80" rx="10"/>
+  <text class="d-t d-b" x="115" y="110" text-anchor="middle">インスタンス</text>
+  <text class="d-t d-b" x="115" y="130" text-anchor="middle">テンプレート</text>
+  <text class="d-s" x="115" y="150" text-anchor="middle">マシンタイプ、イメージなど</text>
+
+  <rect class="d-band" x="260" y="16" width="545" height="170" rx="12"/>
+  <text class="d-s d-b" x="278" y="40">マネージド インスタンス グループ（リージョン MIG）</text>
+
+  <rect class="d-box" x="280" y="56" width="160" height="110" rx="8"/>
+  <text class="d-s" x="360" y="76" text-anchor="middle">ゾーン a</text>
+  <rect class="d-ok" x="300" y="90" width="55" height="30" rx="5"/>
+  <text class="d-s" x="327" y="110" text-anchor="middle">VM</text>
+  <rect class="d-ok" x="365" y="90" width="55" height="30" rx="5"/>
+  <text class="d-s" x="392" y="110" text-anchor="middle">VM</text>
+
+  <rect class="d-box" x="455" y="56" width="160" height="110" rx="8"/>
+  <text class="d-s" x="535" y="76" text-anchor="middle">ゾーン b</text>
+  <rect class="d-ok" x="475" y="90" width="55" height="30" rx="5"/>
+  <text class="d-s" x="502" y="110" text-anchor="middle">VM</text>
+  <rect class="d-warn" x="540" y="90" width="55" height="30" rx="5"/>
+  <text class="d-s" x="567" y="110" text-anchor="middle">故障</text>
+  <text class="d-s d-c-warn" x="535" y="150" text-anchor="middle">→ 自動で作り直す</text>
+
+  <rect class="d-box" x="630" y="56" width="160" height="110" rx="8"/>
+  <text class="d-s" x="710" y="76" text-anchor="middle">ゾーン c</text>
+  <rect class="d-ok" x="650" y="90" width="55" height="30" rx="5"/>
+  <text class="d-s" x="677" y="110" text-anchor="middle">VM</text>
+  <rect class="d-ok d-dashed" x="715" y="90" width="55" height="30" rx="5"/>
+  <text class="d-s" x="742" y="110" text-anchor="middle">追加</text>
+  <text class="d-s d-c-ok" x="710" y="150" text-anchor="middle">← 負荷に応じて増減</text>
+
+  <!-- 矢印（枠のあとに描く） -->
+  <path class="d-line" d="M210,120 L276,120" marker-end="url(#arr)"/>
+
+  <text class="d-s" x="20" y="214"><tspan class="d-b">自動スケーリング</tspan>：負荷（CPU 使用率など）に応じて VM の台数を増減する</text>
+  <text class="d-s" x="20" y="236"><tspan class="d-b">自動修復</tspan>：ヘルスチェックに失敗した VM を作り直す。リージョン MIG は VM を複数のゾーンに分散する</text>
+</svg>
+<figcaption>図2：インスタンス テンプレートとマネージド インスタンス グループ（MIG）</figcaption>
+</figure>
+
+<ul>
+  <li><strong>ゾーン MIG</strong> は1つのゾーンに、<strong>リージョン MIG</strong> は複数のゾーンに VM を作る。ゾーンの障害に備えるならリージョン MIG</li>
+  <li>MIG に向いているのは、どの VM が処理しても結果が同じ<strong>ステートレス</strong>なもの（Web サーバーなど）</li>
+  <li>構成の違う VM をまとめるだけの<strong>非マネージド インスタンス グループ</strong>もあるが、自動スケーリングや自動修復は使えない</li>
+</ul>
+
+<h4>停止しても、料金がかかるもの</h4>
+<p>VM を停止すると、状態は <code>TERMINATED</code> になり、vCPU とメモリの料金はかかりません。ただし、<strong>ディスク、スナップショット、VM に付けたままの外部 IP アドレスは、停止中も課金</strong>されます。使わない VM は、停止ではなく削除します。</p>
+
+<div class="callout warn">
+<strong>何も指定しないと、VM は編集者ロールを持つサービスアカウントで動くことがある</strong>
+<p>VM を作るときにサービスアカウントを指定しないと、Compute Engine は、デフォルトのサービスアカウントを VM に関連付けます（#2 の 6-3）。組織のないプロジェクトなどでは、このサービスアカウントにプロジェクトの<strong>編集者ロールが自動で付与</strong>されています。この学習用プロジェクトでも、Compute Engine API を有効にした時点でそうなっていました（ハンズオンの手順1で確認します）。本番では、アプリごとに専用のサービスアカウントを作って関連付けます。</p>
+</div>
+
+<h3>2-2. GKE（Google Kubernetes Engine）：Kubernetes</h3>
+<p>GKE は、コンテナを動かすための仕組みである Kubernetes を、Google が管理する形で使えるサービスです。Kubernetes の頭脳にあたる<strong>コントロール プレーン</strong>は Google が管理し、コンテナはノード（中身は Compute Engine の VM）の上で動きます。GKE には2つのモードがあります。</p>
+
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th></th><th>Autopilot モード（推奨）</th><th>Standard モード</th></tr></thead>
+  <tbody>
+    <tr><td>ノード</td><td>Google が管理する。台数やサイズを考えなくてよい</td><td>自分で管理する（ノードプールのマシンタイプや台数を決める）</td></tr>
+    <tr><td>課金</td><td>主に Pod が要求したリソース（CPU・メモリなど）</td><td>ノードの VM（Compute Engine の料金）</td></tr>
+    <tr><td>向いているもの</td><td>ほとんどの本番ワークロード</td><td>特別な権限や、ノードの細かい制御が必要なもの</td></tr>
+  </tbody>
+</table>
+</div>
+<ul>
+  <li>どちらのモードも、クラスタ1つにつき<strong>1時間 $0.10 のクラスタ管理手数料</strong>がかかる。請求先アカウントごとに毎月 $74.40 の無料枠（Autopilot クラスタかゾーンの Standard クラスタ1つ分）がある</li>
+  <li>Kubernetes 自体の知識（Pod、Deployment、Service など）が必要になる。チームに経験者がいるか、学ぶ時間があるかも判断材料</li>
+</ul>
+
+<h3>2-3. Cloud Run：コンテナを渡すだけで動く</h3>
+<p>Cloud Run は、コンテナを渡すと、サーバーの用意や台数の増減を Google がすべて行うサービスです。コンテナ イメージを作らなくても、Go、Node.js、Python、Java などはソースコードからデプロイできます（コンテナは自動でビルドされる）。</p>
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th>種類</th><th>何をするか</th><th>例</th></tr></thead>
+  <tbody>
+    <tr><td><strong>サービス</strong></td><td>HTTP リクエストを受けて応答する。<code>*.run.app</code> の URL が付く</td><td>Web アプリ、API</td></tr>
+    <tr><td><strong>ジョブ</strong></td><td>手動またはスケジュールで実行し、終わったら止まる</td><td>夜間バッチ、データ移行</td></tr>
+    <tr><td><strong>ワーカープール</strong></td><td>リクエストを受けずに、常に動き続ける</td><td>Pub/Sub などのキューからメッセージを取り出して処理する</td></tr>
+  </tbody>
+</table>
+</div>
+<ul>
+  <li>リクエストがなければインスタンスは<strong>0 台まで減る</strong>（ゼロへのスケーリング）。最初のリクエストは起動を待つので少し遅くなる。避けたいなら<strong>最小インスタンス数</strong>を設定する（その分の料金がかかる）</li>
+  <li>新しいリビジョン（版）に少しずつトラフィックを移したり、前のリビジョンに戻したりできる</li>
+  <li>#3 で扱ったとおり、Cloud Run は VPC ネットワークの外で動く。VPC の中のリソースにつなぐには設定が必要</li>
+</ul>
+<p>実際に動かすのは #5 Cloud Run ハンズオンで行います。</p>
+
+<h3>2-4. Cloud Run functions：関数を渡すだけで動く</h3>
+<p>Cloud Run functions は、<strong>関数のコードだけ</strong>を書いて動かすサービスです。デプロイすると、関数は自動でコンテナにビルドされ、<strong>Cloud Run サービスとして動きます</strong>。</p>
+<ul>
+  <li>HTTP リクエストのほか、<strong>イベント</strong>（Cloud Storage へのファイルのアップロード、Pub/Sub のメッセージなど）をきっかけに動かせる。イベントは Eventarc で受け取る</li>
+  <li>以前の名前は <strong>Cloud Functions</strong>。今の Cloud Run functions は旧称「Cloud Functions（第 2 世代）」で、旧称「Cloud Functions（第 1 世代）」は「Cloud Run functions（第 1 世代）」になった。<strong>試験や既存の資料では古い名前で出てくることがある</strong></li>
+</ul>
+
+<h3>2-5. App Engine：以前からあるアプリの実行環境</h3>
+<p>App Engine は、コードをデプロイするとアプリとして動かしてくれる、以前からあるサービスです。公式ドキュメントでは、<strong>新しく使う場合は App Engine の代わりに Cloud Run を使うよう推奨</strong>しています。ただし、既存のシステムで使われていることがあり、ACE でも出題されるので、2つの環境の違いは押さえておきます。</p>
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th></th><th>スタンダード環境</th><th>フレキシブル環境</th></tr></thead>
+  <tbody>
+    <tr><td>動く場所</td><td>Google が用意した言語ごとのランタイム（サンドボックス）</td><td>Compute Engine の VM 上の Docker コンテナ</td></tr>
+    <tr><td>起動・デプロイ</td><td>数秒</td><td>数分</td></tr>
+    <tr><td>0 台まで減るか</td><td>減る</td><td>減らない（最低1インスタンス）</td></tr>
+    <tr><td>向いているもの</td><td>急なアクセスの増加、無料や低コストで動かしたいもの</td><td>独自のランタイムや、ネイティブ コードを含むライブラリが必要なもの</td></tr>
+  </tbody>
+</table>
+</div>
+<ul>
+  <li>App Engine のアプリのリージョンは、<strong>作った後に変更できない</strong></li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>3. 選び方</h2>
+<p>実際には、次の順に質問していくと整理しやすくなります。公式の決定木ではなく、ここまでの内容を整理したものです。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 390" role="img" aria-labelledby="f3-title">
+  <title id="f3-title">選び方の目安：コンテナで動かせないなら Compute Engine、Kubernetes が必要なら GKE、イベントに反応する小さな処理なら Cloud Run functions、それ以外は Cloud Run</title>
+  <!-- 質問 -->
+  <rect class="d-box" x="20" y="20" width="440" height="64" rx="10"/>
+  <text class="d-t d-b" x="40" y="46">Q1. コンテナで動かせる？</text>
+  <text class="d-s" x="40" y="68">OS の設定や、特別なソフト・ライセンスに依存していない</text>
+
+  <rect class="d-box" x="20" y="116" width="440" height="64" rx="10"/>
+  <text class="d-t d-b" x="40" y="142">Q2. Kubernetes が必要？</text>
+  <text class="d-s" x="40" y="164">すでに Kubernetes で運用している、細かい制御が必要</text>
+
+  <rect class="d-box" x="20" y="212" width="440" height="64" rx="10"/>
+  <text class="d-t d-b" x="40" y="238">Q3. イベントに反応する小さな処理？</text>
+  <text class="d-s" x="40" y="260">ファイルのアップロード、Pub/Sub のメッセージなど</text>
+
+  <!-- 答え -->
+  <rect class="d-note" x="560" y="20" width="240" height="64" rx="10"/>
+  <text class="d-t d-b" x="680" y="46" text-anchor="middle">Compute Engine</text>
+  <text class="d-s" x="680" y="68" text-anchor="middle">既存システムの移行など</text>
+
+  <rect class="d-note" x="560" y="116" width="240" height="64" rx="10"/>
+  <text class="d-t d-b" x="680" y="142" text-anchor="middle">GKE</text>
+  <text class="d-s" x="680" y="164" text-anchor="middle">まず Autopilot を検討する</text>
+
+  <rect class="d-note" x="560" y="212" width="240" height="64" rx="10"/>
+  <text class="d-t d-b" x="680" y="238" text-anchor="middle">Cloud Run functions</text>
+  <text class="d-s" x="680" y="260" text-anchor="middle">関数のコードだけ書く</text>
+
+  <rect class="d-accent" x="20" y="308" width="440" height="64" rx="10"/>
+  <text class="d-t d-b" x="40" y="334">Cloud Run</text>
+  <text class="d-s" x="40" y="356">HTTP で受けるならサービス、バッチならジョブ</text>
+
+  <!-- 矢印（枠のあとに描く） -->
+  <path class="d-line" d="M460,52 L556,52" marker-end="url(#arr)"/>
+  <text class="d-s" x="508" y="44" text-anchor="middle">いいえ</text>
+  <path class="d-line" d="M240,84 L240,112" marker-end="url(#arr)"/>
+  <text class="d-s" x="252" y="104">はい</text>
+
+  <path class="d-line" d="M460,148 L556,148" marker-end="url(#arr)"/>
+  <text class="d-s" x="508" y="140" text-anchor="middle">はい</text>
+  <path class="d-line" d="M240,180 L240,208" marker-end="url(#arr)"/>
+  <text class="d-s" x="252" y="200">いいえ</text>
+
+  <path class="d-line" d="M460,244 L556,244" marker-end="url(#arr)"/>
+  <text class="d-s" x="508" y="236" text-anchor="middle">はい</text>
+  <path class="d-line" d="M240,276 L240,304" marker-end="url(#arr)"/>
+  <text class="d-s" x="252" y="296">いいえ</text>
+</svg>
+<figcaption>図3：選び方の目安。多くの Web アプリやバッチは、最後の Cloud Run にたどり着く</figcaption>
+</figure>
+
+<ul>
+  <li><strong>Q1</strong>：コンテナにできないもの（特定の OS の設定が必要、コンテナでは動かせない市販ソフト、OS ごとのライセンスなど）は Compute Engine。既存のサーバーをそのまま移す（リフト＆シフト）場合もここ</li>
+  <li><strong>Q2</strong>：Kubernetes の知識と運用の体制があるか。ないなら、Kubernetes を選ぶだけで運用の負担が大きくなる</li>
+  <li><strong>Q3</strong>：処理が関数1つで済むなら Cloud Run functions。複数のエンドポイントを持つ API なら Cloud Run のほうが扱いやすい</li>
+</ul>
+
+<div class="callout ace">
+<strong>ACE のポイント</strong>
+<ul>
+  <li>問題文の言葉から選ぶ：「既存のアプリをそのまま移行」「OS へのアクセスが必要」→ <strong>Compute Engine</strong>。「ステートレスなコンテナ」「トラフィックがないときは費用をかけない」→ <strong>Cloud Run</strong>。「Cloud Storage にファイルがアップロードされたら処理」→ <strong>Cloud Run functions</strong>（古い名前の Cloud Functions で出ることもある）。「Kubernetes」「ノードを管理したくない」→ <strong>GKE Autopilot</strong></li>
+  <li>「途中で止まってもよいバッチを安く」→ <strong>Spot VM</strong>（またはプリエンプティブル VM）。止まると困る処理には使わない</li>
+  <li>「負荷に応じて VM を増減」「故障した VM を自動で置き換え」→ <strong>インスタンス テンプレート＋マネージド インスタンス グループ</strong>（自動スケーリング、ヘルスチェックによる自動修復）。ゾーン障害にも備えるなら<strong>リージョン MIG</strong></li>
+  <li>App Engine：「0 台まで減らしたい」「急なアクセス増加」→ スタンダード環境。「独自のランタイム」「Docker」→ フレキシブル環境。リージョンは後から変えられない</li>
+  <li>VM を停止しても、ディスクと外部 IP アドレスの料金はかかる</li>
+</ul>
+</div>
+
+<!-- ============================================================ -->
+<h2>4. テックリードの視点</h2>
+<div class="callout lead-tip">
+<strong>参画したら確認したいこと</strong>
+<ul class="check">
+  <li>どの実行環境を使っているか。それを選んだ理由は何か（理由がわかると、変更の判断がしやすい）</li>
+  <li>VM で動いているものは、OS の更新やセキュリティ パッチを誰がいつ行っているか</li>
+  <li>バッチ処理はどこで動いているか（VM の cron か、Cloud Run ジョブ＋Cloud Scheduler か）</li>
+  <li>VM や Cloud Run に、どのサービスアカウントを関連付けているか。デフォルトのサービスアカウントのままになっていないか</li>
+  <li>最小インスタンス数、GKE のクラスタ数など、使っていなくてもかかる費用がないか</li>
+</ul>
+</div>
+<ul>
+  <li><strong>オフショアチームへの説明</strong>：「どこまでが自分たちの責任か」を図1の形で示すと伝わりやすい。たとえば Compute Engine なら、OS の更新も自分たちの仕事になる</li>
+  <li><strong>よくある誤解</strong>：「Cloud Run は小さなアプリ向け」と思われがち。実際は、Web アプリや API の多くは Cloud Run で動かせる。逆に、「とりあえず Kubernetes」で GKE を選ぶと、運用の負担が大きくなる</li>
+  <li><strong>設計レビューの観点</strong>：VM を選んでいるなら、コンテナにできない理由があるか。VM を1台ずつ手で作っていないか（インスタンス テンプレートと MIG、または Terraform などで再現できるか）</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>5. ハンズオン：Compute Engine の VM を作って、停止して、削除する</h2>
+<p>学習用の configuration を有効にしたターミナルで実行します（<code>export CLOUDSDK_ACTIVE_CONFIG_NAME=study</code>）。一番自分で管理する範囲が広い Compute Engine を触って、何が自分の管理になるのかを確かめます。Cloud Run は #5 で扱います。</p>
+<p><strong>料金について</strong>：<code>us-central1</code> の <code>e2-micro</code> と、30 GB までの標準永続ディスク（<code>pd-standard</code>）は、Compute Engine の無料枠の対象です（無料枠は請求先アカウント単位で、1か月に e2-micro 1台分の時間まで）。無料枠を使い切っていた場合でも、e2-micro を1時間動かして数円程度です（目安。正確な金額は公式の料金ページで確認してください）。外部 IP アドレスは付けません。最後に VM を削除します。</p>
+
+<h3>手順1. 作る前に観察する（読み取りのみ）</h3>
+<pre><code># 小さめのマシンタイプ（CPUS と MEMORY_GB を比べる）
+gcloud compute machine-types list --zones=us-central1-a \
+  --filter="name:(e2-micro e2-small e2-medium e2-standard-2)"
+
+# サービスアカウントの一覧（Compute Engine のデフォルトのサービスアカウントがある）
+gcloud iam service-accounts list
+
+# デフォルトのサービスアカウントに付いているロール
+gcloud projects get-iam-policy $(gcloud config get-value project) \
+  --flatten="bindings[].members" \
+  --filter="bindings.members~compute@developer" \
+  --format="table(bindings.role)"</code></pre>
+<p>デフォルトのサービスアカウントは、#3 で Compute Engine API を有効にしたときに自動で作られています。3つ目のコマンドで <code>roles/editor</code>（編集者）が表示されれば、2-1 の注意点のとおりです。</p>
+
+<h3>手順2. VM を作る</h3>
+<pre><code>gcloud compute instances create study-vm \
+  --zone=us-central1-a \
+  --machine-type=e2-micro \
+  --image-family=debian-12 \
+  --image-project=debian-cloud \
+  --boot-disk-type=pd-standard \
+  --boot-disk-size=10GB \
+  --no-address \
+  --no-service-account \
+  --no-scopes</code></pre>
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th>指定</th><th>意味</th></tr></thead>
+  <tbody>
+    <tr><td><code>--zone</code></td><td>VM はゾーンのリソース。無料枠の対象の <code>us-central1</code> のゾーンを使う</td></tr>
+    <tr><td><code>--image-family</code><br><code>--image-project</code></td><td>OS のイメージ。<code>debian-cloud</code> プロジェクトにある Debian 12 の最新版を使う</td></tr>
+    <tr><td><code>--boot-disk-type</code><br><code>--boot-disk-size</code></td><td>ブートディスク。無料枠の対象の標準永続ディスクを 10 GB で作る</td></tr>
+    <tr><td><code>--no-address</code></td><td>外部 IP アドレスを付けない（#3 の5節）</td></tr>
+    <tr><td><code>--no-service-account</code><br><code>--no-scopes</code></td><td>サービスアカウントを関連付けない。指定しないと、編集者ロールを持つデフォルトのサービスアカウントを関連付けることになる</td></tr>
+  </tbody>
+</table>
+</div>
+<p>ネットワークを指定していないので、デフォルト ネットワークの <code>us-central1</code> のサブネットが使われます。ディスクのサイズが小さいと性能が下がる、という警告が出ることがありますが、学習用なので問題ありません。</p>
+
+<h3>手順3. 作ったものを確認する（読み取りのみ）</h3>
+<pre><code># VM の一覧（STATUS が RUNNING、EXTERNAL_IP が空のはず）
+gcloud compute instances list
+
+# VM の詳しい情報から、一部だけ表示する
+gcloud compute instances describe study-vm --zone=us-central1-a \
+  --format="yaml(status,machineType,networkInterfaces[0].networkIP,serviceAccounts,scheduling)"
+
+# ブートディスクは、VM とは別のリソースとして作られている
+gcloud compute disks list</code></pre>
+
+<h3>手順4. IAP を通して SSH する</h3>
+<pre><code>gcloud compute ssh study-vm --zone=us-central1-a --tunnel-through-iap</code></pre>
+<ul>
+  <li>VM に外部 IP アドレスはありませんが、IAP による TCP 転送（#3 の5節）で SSH できます。デフォルト ネットワークの <code>default-allow-ssh</code>（送信元 <code>0.0.0.0/0</code>）が、IAP の範囲 <code>35.235.240.0/20</code> からの接続も許可しています</li>
+  <li>初めて使うときは SSH の鍵が作られ（パスフレーズを聞かれる）、公開鍵がプロジェクトのメタデータに登録されます</li>
+</ul>
+<p>VM に入ったら、次を試して <code>exit</code> で抜けます。</p>
+<pre><code># VM が自分の情報を知るためのメタデータ サーバー。どのゾーンで動いているかがわかる
+curl -s -H "Metadata-Flavor: Google" \
+  http://metadata.google.internal/computeMetadata/v1/instance/zone; echo
+
+# インターネットには出られない（外部 IP アドレスも Cloud NAT もないため）。5秒で諦める
+curl -m 5 -sI https://www.google.com || echo "つながらない"
+
+exit</code></pre>
+
+<h3>手順5. 停止する</h3>
+<pre><code>gcloud compute instances stop study-vm --zone=us-central1-a
+
+# STATUS が TERMINATED になる。ディスクは残っている
+gcloud compute instances list
+gcloud compute disks list</code></pre>
+<p>この状態では vCPU とメモリの料金はかかりませんが、ディスクの料金はかかり続けます（2-1）。</p>
+
+<h3>手順6. 片付ける</h3>
+<pre><code>gcloud compute instances delete study-vm --zone=us-central1-a
+
+# ブートディスクも一緒に消えたことを確認する（Listed 0 items.）
+gcloud compute instances list
+gcloud compute disks list</code></pre>
+<p>ブートディスクは、既定では VM を削除すると一緒に削除されます。</p>
+
+<div class="quiz">
+<p class="q">Q1. 手順1の3つ目のコマンドで、デフォルトのサービスアカウントには何のロールが付いていたでしょう？手順2で <code>--no-service-account</code> を付けたのはなぜでしょう？</p>
+<details><summary>答えを見る</summary>
+<p><code>roles/editor</code>（編集者）です。サービスアカウントを指定せずに VM を作ると、このサービスアカウントを VM に関連付けることになり、VM の上で動くプログラムがプロジェクトのほとんどのリソースを変更できてしまいます。今回の VM は Google の API を使わないので、サービスアカウント自体を関連付けませんでした。</p>
+</details>
+
+<p class="q">Q2. 手順4で、VM からインターネットにつながらなかったのはなぜでしょう？つなぐにはどうすればよいでしょう？</p>
+<details><summary>答えを見る</summary>
+<p>VM に外部 IP アドレスがなく、Cloud NAT もないからです。デフォルト ルートはあっても、それだけでは外に出られません（#3）。外部 IP アドレスを付けずに外に出るには、Cloud NAT を構成します。</p>
+</details>
+
+<p class="q">Q3. 手順5で VM を停止した後も、料金がかかり続けるものは何でしょう？</p>
+<details><summary>答えを見る</summary>
+<p>ブートディスクです。外部 IP アドレスを付けていた場合は、それも課金されます。使わない VM は、停止ではなく削除します。</p>
+</details>
+</div>
+
+<!-- ============================================================ -->
+<h2>6. 確認テスト（ACE 形式）</h2>
+<div class="quiz">
+
+<p class="q">問1. オンプレミスで動いている業務アプリを、できるだけ変更せずに Google Cloud に移行したいと考えています。アプリは特定の OS の設定と、OS 単位でライセンスされた市販のミドルウェアに依存しています。どの実行環境を選びますか。</p>
+<ol class="choices">
+  <li>Cloud Run</li>
+  <li>Compute Engine</li>
+  <li>App Engine スタンダード環境</li>
+  <li>Cloud Run functions</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>OS の設定や OS 単位のライセンスに依存するアプリをそのまま移す（リフト＆シフト）なら、OS から自分で管理できる Compute Engine です。</p>
+<ul>
+  <li><strong>A</strong>：コンテナにする必要があり、OS の設定やライセンスの条件を満たせない可能性があります</li>
+  <li><strong>C</strong>：Google が用意したランタイムのサンドボックスで動くので、OS の設定はできません</li>
+  <li><strong>D</strong>：関数として書き直す必要があり、「できるだけ変更せずに」に反します</li>
+</ul>
+</details>
+
+<p class="q">問2. コンテナにしたステートレスな REST API を公開します。アクセスは日中に集中し、夜間はほとんどありません。運用の手間とコストをできるだけ小さくしたいと考えています。どうすればよいですか。</p>
+<ol class="choices">
+  <li>GKE Standard クラスタを作り、ノードプールで自動スケーリングを設定する</li>
+  <li>Compute Engine のマネージド インスタンス グループで自動スケーリングを設定する</li>
+  <li>Cloud Run サービスにデプロイする</li>
+  <li>App Engine フレキシブル環境にデプロイする</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：C</strong></p>
+<p>Cloud Run は、リクエストに応じて自動で台数を増減し、リクエストがなければ 0 台まで減ります。サーバーの管理も不要です。</p>
+<ul>
+  <li><strong>A</strong>：ノードの管理が必要で、クラスタ管理手数料もかかります</li>
+  <li><strong>B</strong>：OS の管理が必要で、VM は 0 台まで減りません</li>
+  <li><strong>D</strong>：フレキシブル環境は最低1インスタンスが動き続けます</li>
+</ul>
+</details>
+
+<p class="q">問3. Cloud Storage のバケットに画像がアップロードされるたびに、サムネイル画像を作りたいと考えています。処理は短く、コードも少量です。サーバーの管理はしたくありません。どうすればよいですか。</p>
+<ol class="choices">
+  <li>Compute Engine の VM で、バケットを1分ごとに確認する cron ジョブを動かす</li>
+  <li>Cloud Storage のイベントをトリガーにする Cloud Run functions の関数を作る</li>
+  <li>GKE Autopilot クラスタで、バケットを確認し続ける Pod を動かす</li>
+  <li>App Engine スタンダード環境で、バケットを確認し続けるアプリを動かす</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>Cloud Run functions は、Cloud Storage へのアップロードなどのイベントをきっかけに関数を実行できます。イベントがないときは費用もかかりません。</p>
+<ul>
+  <li><strong>A、C、D</strong>：どれもバケットを定期的に確認し続ける作りで、処理がないときも動き続けます。A は VM の管理も必要です</li>
+</ul>
+</details>
+
+<p class="q">問4. 毎晩、大量のデータを変換するバッチ処理を Compute Engine で実行しています。処理は途中で止まっても、最初からやり直せます。コストをできるだけ下げたいと考えています。どうすればよいですか。</p>
+<ol class="choices">
+  <li>VM を Spot VM として作成する</li>
+  <li>VM のマシンタイプを大きくして、処理時間を短くする</li>
+  <li>VM を単一テナントノード上に作成する</li>
+  <li>処理が終わったら VM を停止し、外部 IP アドレスは付けたままにする</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：A</strong></p>
+<p>Spot VM は、いつ停止されるかわからない代わりに、通常の VM より大幅に安くなります。やり直しができる（フォールト トレラントな）バッチ処理に向いています。</p>
+<ul>
+  <li><strong>B</strong>：処理時間は短くなっても、単価が上がるので、コストが下がるとは限りません</li>
+  <li><strong>C</strong>：単一テナントノードは、物理サーバーを専有するための仕組みで、コストは上がります</li>
+  <li><strong>D</strong>：停止は正しい方向ですが、外部 IP アドレスは付けたままだと課金されます</li>
+</ul>
+</details>
+
+<p class="q">問5. Compute Engine で動く Web アプリがあります。アクセスの増減に合わせて VM の台数を自動で調整し、応答しなくなった VM は自動で作り直したいと考えています。また、1つのゾーンで障害が起きても動き続けるようにしたいと考えています。どうすればよいですか。</p>
+<ol class="choices">
+  <li>VM のスナップショットを1時間ごとに作成し、障害時に復元する</li>
+  <li>インスタンス テンプレートを作成し、それを使うリージョン マネージド インスタンス グループを作成して、自動スケーリングとヘルスチェックによる自動修復を設定する</li>
+  <li>インスタンス テンプレートを作成し、それを使うゾーン マネージド インスタンス グループを作成して、自動スケーリングを設定する</li>
+  <li>同じ構成の VM を3つのゾーンに手動で作成し、非マネージド インスタンス グループにまとめる</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>台数の自動調整は自動スケーリング、VM の作り直しはヘルスチェックによる自動修復で実現します。リージョン MIG なら、VM が複数のゾーンに分散されます。</p>
+<ul>
+  <li><strong>A</strong>：復元は手作業で、台数の自動調整もできません</li>
+  <li><strong>C</strong>：ゾーン MIG は1つのゾーンだけなので、ゾーンの障害に耐えられません。自動修復も設定していません</li>
+  <li><strong>D</strong>：非マネージド インスタンス グループでは、自動スケーリングも自動修復も使えません</li>
+</ul>
+</details>
+
+<p class="q">問6. 社内では、数十個のマイクロサービスを Kubernetes のマニフェストで管理しています。これらを Google Cloud に移行したいのですが、ノードのサイズや台数の管理、ノードの更新はしたくありません。どうすればよいですか。</p>
+<ol class="choices">
+  <li>GKE Standard クラスタを作成し、ノードプールを自分で設計する</li>
+  <li>GKE Autopilot クラスタを作成し、既存のマニフェストでデプロイする</li>
+  <li>マイクロサービスごとに Compute Engine の VM を作り、Kubernetes を自分でインストールする</li>
+  <li>すべてのマイクロサービスを1つの App Engine スタンダード環境のアプリにまとめる</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>Kubernetes のマニフェストをそのまま使え、ノードの管理を Google に任せられるのは GKE Autopilot です。</p>
+<ul>
+  <li><strong>A</strong>：Standard モードでは、ノードの管理が自分の仕事になります</li>
+  <li><strong>C</strong>：Kubernetes そのものの運用まで自分で行うことになり、要件と逆です</li>
+  <li><strong>D</strong>：Kubernetes のマニフェストは使えず、大きな作り直しが必要です</li>
+</ul>
+</details>
+
+</div>
+
+<!-- ============================================================ -->
+<h2>まとめ</h2>
+<ul>
+  <li>実行環境の違いは「自分で管理する範囲」。Compute Engine（OS から上）→ GKE（コンテナと Kubernetes の設定）→ Cloud Run（コンテナ）→ Cloud Run functions（関数のコード）の順に、自分で管理するものが減る</li>
+  <li>コンテナにできないなら Compute Engine、Kubernetes が必要なら GKE（まず Autopilot）、イベントに反応する小さな処理なら Cloud Run functions、それ以外は Cloud Run</li>
+  <li>Compute Engine：マシンタイプ、Spot VM（安いが止められることがある）、インスタンス テンプレートとマネージド インスタンス グループ（自動スケーリング、自動修復、リージョン MIG）</li>
+  <li>VM を停止しても、ディスクと外部 IP アドレスは課金される。デフォルトのサービスアカウントには編集者ロールが付いていることがある</li>
+  <li>Cloud Run functions の以前の名前は Cloud Functions。App Engine は新しく使うなら Cloud Run が推奨。スタンダード環境は 0 台まで減り、フレキシブル環境は最低1インスタンス</li>
+</ul>
+<p>次回：<strong>#5 Cloud Run ハンズオン</strong>（コンテナのビルドとデプロイ、Artifact Registry）</p>
+
+<p class="lead">参考（公式ドキュメント）：<a href="https://cloud.google.com/compute/docs/machine-resource">マシン ファミリーのリソースと比較ガイド</a>　／　<a href="https://cloud.google.com/compute/docs/instances/spot">Spot VM</a>　／　<a href="https://cloud.google.com/compute/docs/instance-groups">インスタンス グループ</a>　／　<a href="https://cloud.google.com/compute/docs/instances/stop-start-instance">インスタンスの停止と起動</a>　／　<a href="https://cloud.google.com/free/docs/free-cloud-features">無料枠</a>　／　<a href="https://cloud.google.com/kubernetes-engine/docs/concepts/choose-cluster-mode">GKE の運用モード</a>　／　<a href="https://cloud.google.com/kubernetes-engine/pricing">GKE の料金</a>　／　<a href="https://cloud.google.com/run/docs/overview/what-is-cloud-run">Cloud Run とは</a>　／　<a href="https://cloud.google.com/run/docs/functions/comparison">Cloud Run functions の比較</a>　／　<a href="https://cloud.google.com/appengine/docs/the-appengine-environments">App Engine 環境の選択</a></p>
+
+<footer><a href="../index.html">← ロードマップに戻る</a>　｜　最終更新：2026-11-20</footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#3 ネットワーク基礎 | GCP 学習</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<!-- 矢印の定義（ページ内の全 SVG で共有） -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="d-arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+    <marker id="arr-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="d-arrowhead-ok" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+</svg>
+
+<main>
+<p class="breadcrumb"><a href="../index.html">← ロードマップ</a>　｜　<a href="02-iam.html">← #2 IAM</a></p>
+<h1>#3 ネットワーク基礎</h1>
+<p class="lead">VPC ネットワークの形、ファイアウォール ルール、外部 IP を使わない構成を理解する</p>
+
+<div class="card">
+<strong>この回のゴール</strong>
+<ul>
+  <li>VPC ネットワーク（グローバル）とサブネット（リージョン）の関係を説明できる</li>
+  <li>自動モードとカスタムモード、デフォルト ネットワークの注意点を説明できる</li>
+  <li>ファイアウォール ルールの評価のしかた（優先度、暗黙的なアクション、ステートフル）を説明できる</li>
+  <li>外部 IP アドレスを付けずに、外への通信（Cloud NAT）、Google API（限定公開の Google アクセス）、SSH（IAP）を実現する方法を説明できる</li>
+  <li>共有 VPC と VPC ネットワーク ピアリングの違いを説明できる</li>
+</ul>
+</div>
+
+<!-- ============================================================ -->
+<h2>1. VPC ネットワークはグローバル、サブネットはリージョン</h2>
+<p>VPC ネットワーク（Virtual Private Cloud network）は、VM などが内部 IP アドレスで通信するための、プロジェクトの中の仮想的なネットワークです。公式ドキュメントでは、次のように説明されています。</p>
+<ul>
+  <li><strong>VPC ネットワークはグローバルなリソース</strong>。ルートとファイアウォール ルールも含めて、特定のリージョンやゾーンに属さない</li>
+  <li><strong>サブネットはリージョンのリソース</strong>。1つのサブネットは、そのリージョンのすべてのゾーンにまたがる</li>
+</ul>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 320" role="img" aria-labelledby="f1-title">
+  <title id="f1-title">1つの VPC ネットワークの中に、東京と大阪のサブネットがある。サブネットはリージョンのすべてのゾーンにまたがる。東京の VM と大阪の VM は内部 IP で直接通信できる</title>
+  <rect class="d-accent" x="10" y="10" width="800" height="300" rx="14"/>
+  <text class="d-t d-b" x="30" y="38">VPC ネットワーク myapp-vpc（グローバル）</text>
+
+  <!-- 東京 -->
+  <rect class="d-box" x="30" y="54" width="370" height="226" rx="10"/>
+  <text class="d-t d-b" x="45" y="80">リージョン asia-northeast1（東京）</text>
+  <rect class="d-ok" x="45" y="92" width="340" height="174" rx="8"/>
+  <text class="d-s" x="60" y="114">サブネット tokyo-subnet　10.10.0.0/24</text>
+  <rect class="d-box d-dashed" x="60" y="126" width="150" height="126" rx="8"/>
+  <text class="d-s" x="135" y="146" text-anchor="middle">ゾーン a</text>
+  <rect class="d-box" x="75" y="170" width="120" height="44" rx="6"/>
+  <text class="d-s" x="135" y="190" text-anchor="middle">VM</text>
+  <text class="d-s" x="135" y="206" text-anchor="middle">10.10.0.2</text>
+  <rect class="d-box d-dashed" x="220" y="126" width="150" height="126" rx="8"/>
+  <text class="d-s" x="295" y="146" text-anchor="middle">ゾーン b</text>
+  <rect class="d-box" x="235" y="170" width="120" height="44" rx="6"/>
+  <text class="d-s" x="295" y="190" text-anchor="middle">VM</text>
+  <text class="d-s" x="295" y="206" text-anchor="middle">10.10.0.3</text>
+
+  <!-- 大阪 -->
+  <rect class="d-box" x="440" y="54" width="350" height="226" rx="10"/>
+  <text class="d-t d-b" x="455" y="80">リージョン asia-northeast2（大阪）</text>
+  <rect class="d-ok" x="455" y="92" width="320" height="174" rx="8"/>
+  <text class="d-s" x="470" y="114">サブネット osaka-subnet　10.20.0.0/24</text>
+  <rect class="d-box d-dashed" x="470" y="126" width="140" height="126" rx="8"/>
+  <text class="d-s" x="540" y="146" text-anchor="middle">ゾーン a</text>
+  <rect class="d-box" x="480" y="170" width="120" height="44" rx="6"/>
+  <text class="d-s" x="540" y="190" text-anchor="middle">VM</text>
+  <text class="d-s" x="540" y="206" text-anchor="middle">10.20.0.2</text>
+  <rect class="d-box d-dashed" x="620" y="126" width="140" height="126" rx="8"/>
+  <text class="d-s" x="690" y="146" text-anchor="middle">ゾーン b</text>
+
+  <!-- 矢印（枠のあとに描く） -->
+  <path class="d-line-ok" d="M359,192 L476,192" marker-start="url(#arr-ok)" marker-end="url(#arr-ok)"/>
+  <text class="d-s d-c-ok" x="418" y="298" text-anchor="middle">東京と大阪の VM が、VPN なしで内部 IP のまま直接通信できる</text>
+</svg>
+<figcaption>図1：VPC ネットワークは複数のリージョンにまたがる。サブネットはリージョンごとに作り、そのリージョンのすべてのゾーンで使える</figcaption>
+</figure>
+
+<div class="callout">
+<strong>AWS との違い</strong>
+同じ「VPC」「サブネット」という名前でも、範囲の広さが AWS と GCP で1段ずつ違います。
+<table class="kv">
+  <thead><tr><th></th><th>AWS</th><th>GCP</th></tr></thead>
+  <tbody>
+    <tr><td>VPC</td><td>リージョンごと</td><td><strong>グローバル</strong>（すべてのリージョンにまたがる）</td></tr>
+    <tr><td>サブネット</td><td>アベイラビリティ ゾーンごと</td><td><strong>リージョンごと</strong>（そのリージョンのすべてのゾーンにまたがる）</td></tr>
+  </tbody>
+</table>
+また、GCP には「パブリック サブネット」「プライベート サブネット」という区別はありません。外部 IP アドレスを付けるかどうかは、VM ごとに決めます（#1 で触れた点）。
+</div>
+
+<h3>サブネットの IP アドレス範囲</h3>
+<p>サブネットを作るときは、使う IP アドレスの範囲を <code>10.10.0.0/24</code> のような <strong>CIDR 表記</strong>で決めます。<code>/24</code> は「先頭の3つの数字（10.10.0）を固定する」という意味で、<strong><code>10.10.0.0</code>〜<code>10.10.0.255</code> の256個</strong>を表します。<code>/</code> の後ろの数字が小さいほど範囲は広くなり、<code>/16</code> なら <code>10.10.0.0</code>〜<code>10.10.255.255</code>（65,536個）です。サブネットの最小は <code>/29</code>（8個）、自動モードの各サブネットは <code>/20</code>（4,096個。東京は <code>10.146.0.0/20</code>）です。</p>
+
+<h4>プライマリ IPv4 範囲とセカンダリ IPv4 範囲</h4>
+<p>サブネットには、IP アドレス範囲を複数持たせることができます。<strong>必ず1つ持つのがプライマリ IPv4 範囲</strong>、必要なときだけ追加するのがセカンダリ IPv4 範囲です。普段「サブネットの範囲」と言ったら、プライマリ IPv4 範囲のことだと考えて構いません。</p>
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th></th><th>プライマリ IPv4 範囲</th><th>セカンダリ IPv4 範囲</th></tr></thead>
+  <tbody>
+    <tr><td>必須か</td><td><strong>必須</strong>（1つ）</td><td>任意（複数持てる）</td></tr>
+    <tr><td>主な使い道</td><td>VM の内部 IP アドレス、内部ロードバランサなど</td><td>エイリアス IP 範囲だけ。代表例は GKE の Pod や Service の IP アドレス</td></tr>
+    <tr><td>使えないアドレス</td><td>最初の2つと最後の2つ（下の図2）</td><td>なし（すべて使える）</td></tr>
+    <tr><td>作成後の変更</td><td><strong>広げられるが、狭めたり置き換えたりはできない</strong></td><td>使っているリソースがなければ、削除して置き換えられる</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h4>使えない4つのアドレス</h4>
+<p>プライマリ IPv4 範囲のうち、<strong>最初の2つと最後の2つ</strong>は Google Cloud がサブネットの運用に使うので、VM には割り当てられません。<code>10.10.0.0/24</code> の場合は次のようになります。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 190" role="img" aria-labelledby="fr-title">
+  <title id="fr-title">10.10.0.0/24 の256個のアドレスのうち、.0 はネットワーク アドレス、.1 はデフォルト ゲートウェイ、.254 は将来のための予約、.255 はブロードキャスト アドレスで使えない。VM などに使えるのは .2 から .253 までの252個</title>
+  <!-- 上のラベル -->
+  <text class="d-s d-b d-c-warn" x="90" y="40" text-anchor="middle">ネットワーク アドレス</text>
+  <text class="d-s" x="90" y="58" text-anchor="middle">範囲そのものを表す</text>
+  <text class="d-s d-b d-c-ok" x="410" y="44" text-anchor="middle">VM などに使える：.2〜.253 の252個</text>
+  <line class="d-line-ok" x1="210" y1="60" x2="610" y2="60"/>
+  <line class="d-line-ok" x1="210" y1="60" x2="210" y2="70"/>
+  <line class="d-line-ok" x1="610" y1="60" x2="610" y2="70"/>
+  <text class="d-s d-b d-c-warn" x="730" y="40" text-anchor="middle">ブロードキャスト アドレス</text>
+  <text class="d-s" x="730" y="58" text-anchor="middle">VPC は非対応だが予約</text>
+
+  <!-- アドレスの列 -->
+  <rect class="d-warn" x="50" y="76" width="80" height="44"/>
+  <text class="d-t" x="90" y="104" text-anchor="middle">.0</text>
+  <rect class="d-warn" x="130" y="76" width="80" height="44"/>
+  <text class="d-t" x="170" y="104" text-anchor="middle">.1</text>
+  <rect class="d-ok" x="210" y="76" width="80" height="44"/>
+  <text class="d-t" x="250" y="104" text-anchor="middle">.2</text>
+  <rect class="d-ok" x="290" y="76" width="80" height="44"/>
+  <text class="d-t" x="330" y="104" text-anchor="middle">.3</text>
+  <rect class="d-ok" x="370" y="76" width="80" height="44"/>
+  <text class="d-t" x="410" y="104" text-anchor="middle">…</text>
+  <rect class="d-ok" x="450" y="76" width="80" height="44"/>
+  <text class="d-t" x="490" y="104" text-anchor="middle">.252</text>
+  <rect class="d-ok" x="530" y="76" width="80" height="44"/>
+  <text class="d-t" x="570" y="104" text-anchor="middle">.253</text>
+  <rect class="d-warn" x="610" y="76" width="80" height="44"/>
+  <text class="d-t" x="650" y="104" text-anchor="middle">.254</text>
+  <rect class="d-warn" x="690" y="76" width="80" height="44"/>
+  <text class="d-t" x="730" y="104" text-anchor="middle">.255</text>
+
+  <!-- 下のラベル -->
+  <text class="d-s d-b d-c-warn" x="170" y="146" text-anchor="middle">デフォルト ゲートウェイ</text>
+  <text class="d-s" x="170" y="164" text-anchor="middle">サブネットの外への出口</text>
+  <text class="d-s d-b d-c-warn" x="650" y="146" text-anchor="middle">最後から2番目</text>
+  <text class="d-s" x="650" y="164" text-anchor="middle">将来のために予約</text>
+</svg>
+<figcaption>図2：<code>10.10.0.0/24</code> の場合。赤の4つは VM に割り当てられない</figcaption>
+</figure>
+
+<table class="kv">
+  <thead><tr><th>アドレス</th><th>名前</th><th>意味</th></tr></thead>
+  <tbody>
+    <tr><td><code>.0</code>（最初）</td><td>ネットワーク アドレス</td><td>「10.10.0.0/24 という範囲」そのものを指す名前。住所で言えば「○○町」にあたり、個々の家（VM）には使わない</td></tr>
+    <tr><td><code>.1</code>（2番目）</td><td>デフォルト ゲートウェイ アドレス</td><td>VM が、サブネットの外にパケットを送るときの出口。GCP では仮想的なもので、ping には応答しない</td></tr>
+    <tr><td><code>.254</code>（最後から2番目）</td><td>―</td><td>Google Cloud が将来使うために予約している</td></tr>
+    <tr><td><code>.255</code>（最後）</td><td>ブロードキャスト アドレス</td><td>従来のネットワークでは「サブネットの全員宛て」を意味するアドレス。VPC ネットワークはブロードキャストに対応していないが、このアドレスは予約されている</td></tr>
+  </tbody>
+</table>
+
+<h4>範囲を決めるときのルール</h4>
+<ul>
+  <li>同じ VPC ネットワークの中で、サブネットの範囲（プライマリもセカンダリも）は<strong>重複できない</strong></li>
+  <li>VPC ネットワーク ピアリング（項番7）でつなぐネットワークどうしも、サブネットの範囲が重なっているとピアリングできない。<strong>将来つなぐ可能性のあるネットワーク（オンプレミスを含む）と重ならないように計画する</strong></li>
+  <li>普通は、プライベート IP アドレスの範囲（<code>10.0.0.0/8</code>、<code>172.16.0.0/12</code>、<code>192.168.0.0/16</code>）から選ぶ</li>
+  <li>プライマリ IPv4 範囲は後から広げられる（<code>gcloud compute networks subnets expand-ip-range</code>）が、狭めることはできない。広げた範囲がほかのサブネットと重なる場合は広げられないので、余裕を持って割り当てる</li>
+</ul>
+
+<h3>サブネットは何のためにあるのか</h3>
+<p>GCP にパブリック／プライベートの区別がないのは、<strong>インターネットに出られるかどうかを決める単位が違う</strong>からです。</p>
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th></th><th>AWS</th><th>GCP</th></tr></thead>
+  <tbody>
+    <tr><td>ルートの単位</td><td>サブネットに関連付けたルートテーブル</td><td><strong>VPC ネットワーク全体</strong>（項番6）</td></tr>
+    <tr><td>インターネットに出られるか</td><td>サブネットのルートテーブルに、インターネット ゲートウェイへのルートがあるか（＝パブリック サブネット）</td><td><strong>VM ごと</strong>に、外部 IP アドレスがあるか（またはそのサブネットに Cloud NAT があるか）と、ファイアウォール ルールで決まる</td></tr>
+  </tbody>
+</table>
+</div>
+<p>では、GCP のサブネットは何のためにあるのでしょうか。主に次の4つの役割があります。</p>
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th>役割</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td>① リージョンに IP アドレスを用意する</td><td>VPC ネットワークはグローバルで、それ自体は IP アドレス範囲を持たない。リージョンごとに使うアドレスを決めるのがサブネット。<strong>VM などを作るときは必ずネットワークとサブネットを選ぶ</strong>ので、サブネットのないリージョンには、そのネットワークの VM を置けない</td></tr>
+    <tr><td>② サブネット単位の設定</td><td>限定公開の Google アクセス（項番5）、VPC フローログ、GKE 用のセカンダリ IPv4 範囲などは、サブネットごとに設定する</td></tr>
+    <tr><td>③ 権限の単位</td><td>共有 VPC（項番7）では、サービス プロジェクトの人に、ネットワーク全体ではなく<strong>選んだサブネットだけ</strong>を使わせることができる（<code>roles/compute.networkUser</code> をサブネットで付与する）</td></tr>
+    <tr><td>④ 通信の制御</td><td>ファイアウォール ルールの送信元に、サブネットの範囲を指定できる（例：DB の VM には、アプリ用サブネットの範囲からだけ許可する）。Cloud NAT も、どのサブネットに使うかを選ぶ</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout lead-tip">
+<strong>テックリードの視点：「プライベート サブネットはどれですか？」と聞かれたら</strong>
+AWS の経験があるメンバーからよく出る質問です。GCP では、サブネットの種類ではなく、次の組み合わせで同じことを実現していると説明します。
+<ul>
+  <li>VM に外部 IP アドレスを付けない（組織ポリシー <code>constraints/compute.vmExternalIpAccess</code> で禁止できる。#1）</li>
+  <li>外への通信が必要なら、そのサブネットに Cloud NAT を設定する</li>
+  <li>Google の API へは、限定公開の Google アクセスを使う</li>
+</ul>
+</div>
+
+<h3>1つのリージョンに複数のサブネットを作れる</h3>
+<p>カスタムモードの VPC ネットワークでは、1つのリージョンに複数のサブネットを自由に作れます。自動モードでも、自動で作られる各リージョン1つのサブネットに加えて、<code>10.128.0.0/9</code> の外の範囲を使えば手動で追加できます。</p>
+<p>同じリージョンでサブネットを分ける理由は、上の②〜④です。</p>
+<ul>
+  <li>役割ごとに分けて、ファイアウォール ルールの送信元に使う（例：アプリ用と DB 用）</li>
+  <li>あるサブネットだけ、VPC フローログや限定公開の Google アクセスを有効にする</li>
+  <li>共有 VPC で、チームごとに使えるサブネットを分ける</li>
+  <li>GKE 用やロードバランサ用など、特別な用途のサブネットを別に用意する</li>
+</ul>
+
+<div class="callout warn">
+<strong>サブネットを分けても、それだけでは通信は遮断されない</strong>
+同じ VPC ネットワークのサブネットどうしには、自動でサブネット ルートがあります（項番6）。通信を止めるかどうかを決めるのは<strong>ファイアウォール ルール</strong>です。「サブネットを分ければ分離できる」と考えると誤解のもとになります。
+<ul>
+  <li>ゾーン冗長のために分ける必要はない（1つのサブネットが、リージョンのすべてのゾーンにまたがる）</li>
+  <li>細かく分けすぎない。サブネットの名前とリージョンは作成後に変えられず、プライマリ IPv4 範囲は狭められない。分けるほど、IP アドレスの計画と管理が大変になる</li>
+  <li>目安は、「分けると、何の設定・権限・ルールが変わるのか」を説明できるときだけ分けること</li>
+</ul>
+</div>
+
+<!-- ============================================================ -->
+<h2>2. 自動モード、カスタムモード、デフォルト ネットワーク</h2>
+<p>VPC ネットワークには、サブネットの作り方（サブネット作成モード）によって2種類あります。</p>
+
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th></th><th>自動モード VPC ネットワーク</th><th>カスタムモード VPC ネットワーク</th></tr></thead>
+  <tbody>
+    <tr><td>サブネット</td><td>各リージョンに1つずつ自動で作られる。新しいリージョンができると自動で追加される</td><td>自動では作られない。必要なリージョンに、自分で範囲を決めて作る</td></tr>
+    <tr><td>IP アドレス範囲</td><td>決められた範囲（<code>10.128.0.0/9</code> の中）</td><td>自分で決める</td></tr>
+    <tr><td>切り替え</td><td>カスタムモードに切り替えられる</td><td><strong>自動モードには戻せない</strong>（一方向）</td></tr>
+    <tr><td>向いている用途</td><td>試用、学習</td><td><strong>本番</strong>。オンプレミスや他のネットワークと範囲が重ならないよう計画できる</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>新しいプロジェクトには、組織ポリシーで止めていない限り、<strong>デフォルト ネットワーク</strong>（<code>default</code> という名前の自動モード VPC ネットワーク）が作られます。デフォルト ネットワークには、次のファイアウォール ルールが最初から入っています。</p>
+
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th>ルール名</th><th>許可する上り（内向き）の通信</th><th>送信元</th></tr></thead>
+  <tbody>
+    <tr><td><code>default-allow-internal</code></td><td>TCP・UDP のすべてのポートと ICMP</td><td><code>10.128.0.0/9</code>（ネットワークの中）</td></tr>
+    <tr><td><code>default-allow-ssh</code></td><td>TCP 22（SSH）</td><td><strong><code>0.0.0.0/0</code>（インターネットのどこからでも）</strong></td></tr>
+    <tr><td><code>default-allow-rdp</code></td><td>TCP 3389（リモート デスクトップ）</td><td><strong><code>0.0.0.0/0</code></strong></td></tr>
+    <tr><td><code>default-allow-icmp</code></td><td>ICMP（ping など）</td><td><strong><code>0.0.0.0/0</code></strong></td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout warn">
+<strong>デフォルト ネットワークは本番では使わない</strong>
+外部 IP アドレスを付けた VM をデフォルト ネットワークに作ると、インターネットのどこからでも SSH の接続を試せる状態になります。#1 で見た「外部 IP を禁止する組織ポリシー」や、デフォルト ネットワークを作らない組織ポリシー（<code>constraints/compute.skipDefaultNetworkCreation</code>）は、これを防ぐためのものです。本番では、カスタムモードの VPC ネットワークを作り、必要な通信だけを許可します。
+</div>
+
+<!-- ============================================================ -->
+<h2>3. ファイアウォール ルール</h2>
+<p>VPC ファイアウォール ルールは、VM に出入りする通信を許可または拒否します。ルールは<strong>VPC ネットワークに対して定義し、VM ごとに適用</strong>されます。ルールの作成と利用に料金はかかりません（ログを有効にした場合は Cloud Logging の料金がかかります）。</p>
+
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th>要素</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td>方向</td><td>上り（内向き、ingress）か、下り（外向き、egress）のどちらか一方</td></tr>
+    <tr><td>優先度</td><td>0〜65535。<strong>数値が小さいほど優先</strong>。省略すると 1000</td></tr>
+    <tr><td>アクション</td><td>allow（許可）か deny（拒否）のどちらか一方</td></tr>
+    <tr><td>ターゲット</td><td>ルールを適用する VM。ネットワークのすべての VM、<strong>ネットワーク タグ</strong>を持つ VM、特定の<strong>サービスアカウント</strong>で動く VM のどれか（タグとサービスアカウントは同じルールで混ぜられない）</td></tr>
+    <tr><td>送信元・宛先</td><td>IP アドレス範囲など。上りのルールで送信元を省略すると <code>0.0.0.0/0</code>（すべて）になる</td></tr>
+    <tr><td>プロトコルとポート</td><td><code>tcp:22</code>、<code>tcp:80,tcp:443</code> など</td></tr>
+  </tbody>
+</table>
+</div>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 250" role="img" aria-labelledby="f2-title">
+  <title id="f2-title">ファイアウォール ルールの評価：優先度の数値が小さい順に確認し、最初に一致したルールのアクションで決まる。例では、送信元 203.0.113.5 からの TCP 22 は、優先度 100 の IAP 用の許可ルールには一致せず、優先度 1000 の拒否ルールに一致して拒否される</title>
+  <rect class="d-box" x="10" y="80" width="180" height="84" rx="10"/>
+  <text class="d-s d-b" x="100" y="104" text-anchor="middle">上り（内向き）の通信</text>
+  <text class="d-s" x="100" y="126" text-anchor="middle">送信元 203.0.113.5</text>
+  <text class="d-s" x="100" y="146" text-anchor="middle">宛先 TCP 22</text>
+
+  <text class="d-s" x="455" y="30" text-anchor="middle">優先度の数値が小さい順に確認し、最初に一致したルールで決まる</text>
+  <rect class="d-box" x="230" y="46" width="450" height="44" rx="8"/>
+  <text class="d-s" x="245" y="73">優先度 100　allow　tcp:22　送信元 35.235.240.0/20</text>
+  <text class="d-s" x="666" y="73" text-anchor="end">✕ 一致しない</text>
+  <rect class="d-warn" x="230" y="100" width="450" height="44" rx="8"/>
+  <text class="d-s" x="245" y="127">優先度 1000　deny　すべて　送信元 0.0.0.0/0</text>
+  <text class="d-s d-b d-c-warn" x="666" y="127" text-anchor="end">✓ 一致</text>
+  <rect class="d-box d-dashed" x="230" y="154" width="450" height="44" rx="8"/>
+  <text class="d-s" x="245" y="181">暗黙的なアクション（どのルールにも一致しないとき）</text>
+  <text class="d-s" x="666" y="181" text-anchor="end">確認されない</text>
+
+  <rect class="d-warn" x="710" y="100" width="100" height="44" rx="10"/>
+  <text class="d-t d-b d-c-warn" x="760" y="127" text-anchor="middle">拒否</text>
+
+  <!-- 矢印（枠のあとに描く） -->
+  <path class="d-line" d="M190,122 L226,122" marker-end="url(#arr)"/>
+  <path class="d-line" d="M680,122 L706,122" marker-end="url(#arr)"/>
+  <text class="d-s" x="455" y="232" text-anchor="middle">暗黙的なアクション：上り（内向き）は拒否、下り（外向き）は許可</text>
+</svg>
+<figcaption>図3：ファイアウォール ルールの評価。上の例では、IAP 以外からの SSH が拒否される</figcaption>
+</figure>
+
+<ul>
+  <li><strong>優先度が同じ</strong>で allow と deny の両方に一致したときは、<strong>deny が優先</strong>される</li>
+  <li>どのルールにも一致しないときは、<strong>暗黙的なアクション</strong>が使われる。上り（内向き）は拒否、下り（外向き）は許可。つまり、何もしなければ「外からは入れないが、中からは出られる」</li>
+  <li><strong>ステートフル</strong>：許可された通信の戻りのパケットは、それを許可するルールがなくても通る。戻りのパケットを拒否するルールは作れない</li>
+</ul>
+
+<div class="callout ace">
+<strong>ACE のポイント</strong>
+<ul>
+  <li>「許可ルールを追加したのに通らない」→ 優先度を確認する。同じ優先度の deny がある、またはより小さい数値の deny がある</li>
+  <li>特定の VM だけに適用したい → <strong>ネットワーク タグ</strong>（<code>--target-tags</code>）か<strong>サービスアカウント</strong>（<code>--target-service-accounts</code>）でターゲットを絞る</li>
+  <li><code>gcloud compute firewall-rules create</code> で <code>--network</code> を省略すると、<strong><code>default</code> ネットワーク</strong>にルールが作られる。<code>--source-ranges</code> を省略すると <strong><code>0.0.0.0/0</code></strong> になる。どちらも意図しない設定になりやすい</li>
+</ul>
+</div>
+
+<p class="lead">VPC ファイアウォール ルールのほかに、複数の VPC ネットワークや組織全体にまとめてルールを適用する<strong>ファイアウォール ポリシー</strong>（階層型ファイアウォール ポリシーなど）もあります。まずは VPC ファイアウォール ルールを押さえましょう。</p>
+
+<!-- ============================================================ -->
+<h2>4. 内部 IP アドレスと外部 IP アドレス</h2>
+
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th></th><th>エフェメラル（一時的）</th><th>静的（予約する）</th><th>料金</th></tr></thead>
+  <tbody>
+    <tr><td>内部 IP アドレス</td><td>サブネットの範囲から自動で割り当てられる</td><td>範囲の中の特定のアドレスを予約して使う</td><td>かからない</td></tr>
+    <tr><td>外部 IP アドレス</td><td>VM を停止または削除すると解放され、次は別のアドレスになることがある</td><td>予約したアドレスを使い続けられる</td><td><strong>VM が使っている間もかかる</strong>。予約したまま使っていない静的アドレスは、より高い料金になる</td></tr>
+  </tbody>
+</table>
+</div>
+
+<ul>
+  <li>VM は必ず内部 IP アドレスを持つ。外部 IP アドレスは任意</li>
+  <li>外部 IP アドレスは、インターネットから届く入口になるうえに、料金もかかる。<strong>必要な VM にだけ付ける</strong>のが基本</li>
+  <li>使わなくなった静的外部 IP アドレスは、解放しないと課金が続く（<code>gcloud compute addresses list</code> の <code>STATUS</code> が <code>RESERVED</code> なら未使用）</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>5. 外部 IP アドレスを付けずに運用する</h2>
+<p>外部 IP アドレスがない VM でも、次の3つを組み合わせれば、ほとんどの用途に対応できます。#1 で見た「外部 IP を禁止する」組織ポリシーがある環境では、これが標準の構成です。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 330" role="img" aria-labelledby="f3-title">
+  <title id="f3-title">外部 IP のない VM：インターネットへの下りの通信は Cloud NAT を通る。運用者の SSH は IAP を通り、送信元 35.235.240.0/20 から届く。Cloud Storage などの Google API へは、限定公開の Google アクセスで到達する</title>
+  <!-- VPC -->
+  <rect class="d-box" x="330" y="10" width="480" height="310" rx="12"/>
+  <text class="d-s d-b" x="345" y="308">VPC ネットワーク</text>
+  <rect class="d-note" x="350" y="30" width="190" height="56" rx="8"/>
+  <text class="d-t d-b" x="445" y="54" text-anchor="middle">Cloud NAT</text>
+  <text class="d-s" x="445" y="74" text-anchor="middle">Cloud Router 上に構成</text>
+  <rect class="d-ok" x="560" y="70" width="230" height="220" rx="10"/>
+  <text class="d-s d-b" x="675" y="92" text-anchor="middle">サブネット</text>
+  <text class="d-s" x="675" y="112" text-anchor="middle">限定公開の Google アクセス：オン</text>
+  <rect class="d-box" x="590" y="160" width="170" height="60" rx="8"/>
+  <text class="d-t d-b" x="675" y="184" text-anchor="middle">VM</text>
+  <text class="d-s" x="675" y="206" text-anchor="middle">外部 IP なし・10.10.0.2</text>
+
+  <!-- 外側 -->
+  <rect class="d-box" x="10" y="40" width="164" height="50" rx="10"/>
+  <text class="d-t" x="92" y="70" text-anchor="middle">🌐 インターネット</text>
+  <rect class="d-box" x="10" y="140" width="164" height="50" rx="10"/>
+  <text class="d-t" x="92" y="170" text-anchor="middle">👤 運用者</text>
+  <rect class="d-accent" x="200" y="140" width="110" height="50" rx="10"/>
+  <text class="d-t d-b" x="255" y="170" text-anchor="middle">IAP</text>
+  <rect class="d-box" x="10" y="240" width="164" height="56" rx="10"/>
+  <text class="d-s d-b" x="92" y="264" text-anchor="middle">Google API</text>
+  <text class="d-s" x="92" y="284" text-anchor="middle">Cloud Storage など</text>
+
+  <!-- 矢印（枠のあとに描く） -->
+  <path class="d-line" d="M600,160 L540,90" marker-end="url(#arr)"/>
+  <path class="d-line" d="M350,65 L178,65" marker-end="url(#arr)"/>
+  <text class="d-s" x="262" y="56" text-anchor="middle">下り（外向き）だけ</text>
+  <path class="d-line" d="M174,165 L196,165" marker-end="url(#arr)"/>
+  <path class="d-line" d="M310,170 L586,186" marker-end="url(#arr)"/>
+  <text class="d-s" x="450" y="164" text-anchor="middle">TCP 22（送信元 35.235.240.0/20）</text>
+  <path class="d-line" d="M590,212 L178,262" marker-end="url(#arr)"/>
+  <text class="d-s" x="330" y="226" text-anchor="middle">限定公開の Google アクセス</text>
+</svg>
+<figcaption>図4：外部 IP のない VM の通信。インターネットから VM へ直接届く経路はない</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th>やりたいこと</th><th>使うもの</th><th>ポイント</th></tr></thead>
+  <tbody>
+    <tr><td>VM からインターネットへ出る<br>（OS の更新、外部 API の呼び出し）</td><td><strong>Cloud NAT</strong></td><td>リージョンごとに、Cloud Router 上に構成する。VM から始めた通信の応答だけを通し、<strong>外から始まる接続は通さない</strong>。プロキシ用の VM などは不要（Google のソフトウェアで実現されている）</td></tr>
+    <tr><td>VM から Google API へ<br>（Cloud Storage、BigQuery など）</td><td><strong>限定公開の Google アクセス</strong><br>（Private Google Access）</td><td><strong>サブネットごと</strong>に有効にする。外部 IP のない VM が、インターネットを経由せずに Google API を使える。外部 IP がある VM には関係しない</td></tr>
+    <tr><td>運用者が VM に SSH する</td><td><strong>IAP による TCP 転送</strong></td><td>ファイアウォール ルールで <code>35.235.240.0/20</code> からの TCP 22 を許可する。運用者には IAP で保護されたトンネル ユーザー（<code>roles/iap.tunnelResourceAccessor</code>）が必要（SSH の鍵の登録などのため、Compute インスタンス管理者（v1）なども必要）。<code>gcloud compute ssh VM名 --tunnel-through-iap</code> で接続する</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout ace">
+<strong>ACE のポイント</strong>
+<ul>
+  <li>「外部 IP のない VM がインターネットから更新をダウンロードしたい」→ <strong>Cloud NAT</strong></li>
+  <li>「外部 IP のない VM が Cloud Storage を使いたい。インターネットへは出したくない」→ <strong>限定公開の Google アクセス</strong></li>
+  <li>「外部 IP を付けずに SSH したい」「踏み台 VM を置きたくない」→ <strong>IAP</strong>（<code>35.235.240.0/20</code> を許可）</li>
+  <li>Cloud NAT は外から中への接続には使えない。SSH の入口にはならない</li>
+</ul>
+</div>
+
+<!-- ============================================================ -->
+<h2>6. ルート</h2>
+<p>ルートは、「宛先がこの範囲なら、ここへ送る」という経路の情報です。VPC ネットワークを作ると、次のルートが自動で作られます。</p>
+<ul>
+  <li><strong>サブネット ルート</strong>：各サブネットの範囲への経路。これがあるので、同じ VPC ネットワークの VM は、リージョンが違っても内部 IP で通信できる（図1）</li>
+  <li><strong>デフォルト ルート</strong>：宛先 <code>0.0.0.0/0</code>、次のホップは <code>default-internet-gateway</code>。どのルートにも一致しない通信を、VPC ネットワークの外へ送る。削除や置き換えもできる</li>
+</ul>
+<p>ルートがあっても、外部 IP アドレス（または Cloud NAT）がなければインターネットとは通信できません。また、ルートは「経路」を決めるだけで、通信を許可するかどうかはファイアウォール ルールが決めます。</p>
+
+<!-- ============================================================ -->
+<h2>7. プロジェクトをまたいでつなぐ：共有 VPC と VPC ネットワーク ピアリング</h2>
+<p>実務では、1つのシステムでも、チームや役割ごとにプロジェクトを分けることがよくあります。プロジェクトをまたいで内部 IP アドレスで通信する代表的な方法は、次の2つです。</p>
+<ul>
+  <li><strong>共有 VPC</strong>（Shared VPC）：1つの VPC ネットワークを、複数のプロジェクトで使う（7-1）</li>
+  <li><strong>VPC ネットワーク ピアリング</strong>（VPC Network Peering）：別々の VPC ネットワークどうしをつなぐ（7-2）</li>
+</ul>
+
+<h3>7-1. 共有 VPC：1つのネットワークを複数のプロジェクトで使う</h3>
+<p>ネットワークを持つプロジェクトを<strong>ホスト プロジェクト</strong>（host project）、そのネットワークを使うプロジェクトを<strong>サービス プロジェクト</strong>（service project）と呼びます。サービス プロジェクトは、ホスト プロジェクトに接続して使います。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 270" role="img" aria-labelledby="f5-title">
+  <title id="f5-title">共有 VPC：本番環境のホスト プロジェクトが持つ VPC ネットワークとサブネットを、サービス プロジェクト myapp-web と myapp-api の VM などが使う。web から api へは内部 IP アドレスで通信できる</title>
+  <rect class="d-band" x="10" y="10" width="800" height="250" rx="12"/>
+  <text class="d-s d-b" x="30" y="34">組織（本番環境）</text>
+  <rect class="d-accent" x="190" y="30" width="440" height="86" rx="10"/>
+  <text class="d-t d-b" x="410" y="58" text-anchor="middle">ホスト プロジェクト</text>
+  <text class="d-s" x="410" y="80" text-anchor="middle">共有 VPC ネットワーク、サブネット、ファイアウォール ルール</text>
+  <text class="d-s" x="410" y="100" text-anchor="middle">ネットワークの担当者が管理する</text>
+  <rect class="d-box" x="40" y="170" width="320" height="70" rx="10"/>
+  <text class="d-t d-b" x="200" y="198" text-anchor="middle">サービス プロジェクト（myapp-web）</text>
+  <text class="d-s" x="200" y="221" text-anchor="middle">Web 層の VM など。Web チームが管理する</text>
+  <rect class="d-box" x="460" y="170" width="320" height="70" rx="10"/>
+  <text class="d-t d-b" x="620" y="198" text-anchor="middle">サービス プロジェクト（myapp-api）</text>
+  <text class="d-s" x="620" y="221" text-anchor="middle">API 層の VM など。API チームが管理する</text>
+
+  <!-- 矢印（枠のあとに描く） -->
+  <path class="d-line" d="M200,170 L320,120" marker-end="url(#arr)"/>
+  <path class="d-line" d="M620,170 L500,120" marker-end="url(#arr)"/>
+  <text class="d-s" x="410" y="146" text-anchor="middle">サブネットを使う</text>
+  <path class="d-line-ok" d="M362,214 L456,214" marker-end="url(#arr-ok)"/>
+  <text class="d-s d-c-ok" x="410" y="204" text-anchor="middle">内部 IP で通信</text>
+</svg>
+<figcaption>図5：共有 VPC。ネットワークはホスト プロジェクトで一元管理し、VM などはサービス プロジェクトで管理する</figcaption>
+</figure>
+
+<p>共有 VPC を使う一番の理由は、<strong>ネットワークの管理とアプリの管理を分けられる</strong>ことです。</p>
+<ul>
+  <li>ネットワークの担当者は、ホスト プロジェクトでサブネット、ファイアウォール ルール、VPN などを管理する</li>
+  <li>サービス プロジェクトの管理者は、共有 VPC ネットワークを使う VM などを作れるが、ネットワークに影響する変更はできない（最小権限）</li>
+  <li>同じネットワークを使うので、プロジェクトが違っても内部 IP アドレスで通信できる（図5の web から api への呼び出し）</li>
+  <li>オンプレミスとの VPN や Cloud Interconnect をホスト プロジェクトに1つ作れば、すべてのサービス プロジェクトから使える</li>
+</ul>
+<p>ホスト プロジェクトとサービス プロジェクトは、<strong>同じ組織</strong>にある必要があります。</p>
+
+<div class="callout warn">
+<strong>本番とステージングは、別のホスト プロジェクト（別のネットワーク）にするのが一般的</strong>
+<p>同じ共有 VPC ネットワークに接続したプロジェクトどうしは、ファイアウォール ルールで許可すれば内部 IP アドレスで通信できます。公式ドキュメントの例でも、本番環境用とテスト環境用でホスト プロジェクトを分けています。ネットワークが別々なら、ファイアウォール ルールを間違えても本番とステージングはつながりません。</p>
+</div>
+
+<h3>7-2. VPC ネットワーク ピアリング：別々のネットワークをつなぐ</h3>
+<p>VPC ネットワーク ピアリングは、2つの VPC ネットワークをつなぎ、内部 IP アドレスで通信できるようにします。つないだあとも、<strong>それぞれのネットワークは別々の管理者が管理します</strong>。つなぐネットワークは、同じプロジェクト、同じ組織の別のプロジェクト、<strong>別の組織のプロジェクト</strong>のどれでもかまいません。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 250" role="img" aria-labelledby="f6-title">
+  <title id="f6-title">VPC ネットワーク ピアリング：net-a と net-b、net-a と net-c をピアリングしても、net-b と net-c は通信できない（推移的ではない）</title>
+  <rect class="d-box" x="300" y="20" width="220" height="70" rx="10"/>
+  <text class="d-t d-b" x="410" y="50" text-anchor="middle">VPC ネットワーク net-a</text>
+  <text class="d-s" x="410" y="72" text-anchor="middle">管理者 A</text>
+  <rect class="d-box" x="40" y="160" width="220" height="70" rx="10"/>
+  <text class="d-t d-b" x="150" y="190" text-anchor="middle">VPC ネットワーク net-b</text>
+  <text class="d-s" x="150" y="212" text-anchor="middle">管理者 B（別の組織でもよい）</text>
+  <rect class="d-box" x="560" y="160" width="220" height="70" rx="10"/>
+  <text class="d-t d-b" x="670" y="190" text-anchor="middle">VPC ネットワーク net-c</text>
+  <text class="d-s" x="670" y="212" text-anchor="middle">管理者 C</text>
+
+  <!-- 線（枠のあとに描く） -->
+  <path class="d-line-ok" d="M330,90 L190,160"/>
+  <path class="d-line-ok" d="M490,90 L630,160"/>
+  <text class="d-s d-c-ok" x="218" y="114" text-anchor="end">ピアリング（通信できる）</text>
+  <text class="d-s d-c-ok" x="602" y="114">ピアリング（通信できる）</text>
+  <path class="d-line-warn d-dashed" d="M262,195 L558,195"/>
+  <text class="d-s d-c-warn" x="410" y="185" text-anchor="middle">✕ 通信できない</text>
+  <text class="d-s d-c-warn" x="410" y="214" text-anchor="middle">（推移的ではない）</text>
+</svg>
+<figcaption>図6：VPC ネットワーク ピアリング。net-b と net-c も通信させるには、net-b と net-c を直接ピアリングする</figcaption>
+</figure>
+
+<ul>
+  <li><strong>推移的ではない</strong>：図6のように、net-a–net-b と net-a–net-c をつないでも、net-b と net-c は通信できない</li>
+  <li><strong>IP アドレス範囲が重なるネットワークはつなげない</strong>（項番1）。すべての自動モードのネットワークは同じ <code>10.128.0.0/9</code> の中に範囲を作るので、自動モードどうしもつなげない</li>
+  <li>主な使いどころ：
+    <ul>
+      <li>別の組織のネットワークとつなぐ（共有 VPC は同じ組織の中でしか使えない）</li>
+      <li>SaaS を提供する側と使う側のネットワークをつなぐ</li>
+      <li>身近な例：Cloud SQL などを内部 IP アドレスで使う<strong>プライベート サービス アクセス</strong>も、内部では VPC ネットワーク ピアリングでつないでいる（Google が管理するネットワークとつなぐ）</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>7-3. 違いと選び方</h3>
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th></th><th>共有 VPC（Shared VPC）</th><th>VPC ネットワーク ピアリング</th></tr></thead>
+  <tbody>
+    <tr><td>形</td><td>1つの VPC ネットワークを、複数のプロジェクトで使う</td><td>別々の VPC ネットワークどうしを、内部 IP アドレスで通信できるようにつなぐ</td></tr>
+    <tr><td>管理</td><td>ネットワークはホスト プロジェクトで<strong>一元管理</strong>。VM などはサービス プロジェクトで管理</td><td>それぞれのネットワークを、それぞれの管理者が管理する</td></tr>
+    <tr><td>範囲</td><td>同じ組織の中だけ</td><td>別の組織のネットワークともつなげる</td></tr>
+    <tr><td>使いどころ</td><td>同じ組織の、同じ環境（本番など）のプロジェクトで、ネットワークをまとめて管理したい</td><td>管理者や組織が違うネットワークをつなぎたい</td></tr>
+    <tr><td>注意点</td><td>同じネットワークのプロジェクトどうしは通信できるので、環境ごとにホスト プロジェクトを分ける</td><td><strong>推移的ではない</strong>。IP アドレス範囲が重なるネットワークはつなげない</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ============================================================ -->
+<h2>8. Cloud Run などのサーバーレスと VPC</h2>
+<p>Cloud Run は、VPC ネットワークの中ではなく、Google が管理する環境で動きます。そのため、内部 IP アドレスしか持たないリソース（VM、Memorystore など）に Cloud Run から接続するには、追加の設定が必要です。</p>
+<ul>
+  <li><strong>ダイレクト VPC 下り（外向き）</strong>（Direct VPC egress）：推奨される方法</li>
+  <li><strong>サーバーレス VPC アクセス コネクタ</strong>（Serverless VPC Access connectors）：以前からある方法</li>
+</ul>
+<p>詳しくは #5 Cloud Run ハンズオンで扱います。ここでは、「Cloud Run は何もしなければ VPC の外にいる」ことを覚えておきましょう。</p>
+
+<!-- ============================================================ -->
+<h2>9. AWS との対応</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>GCP</th><th>AWS で近いもの</th><th>注意点</th></tr></thead>
+  <tbody>
+    <tr><td>VPC ネットワーク（グローバル）</td><td>VPC（リージョン）</td><td>GCP は1つのネットワークで複数のリージョンをカバーできる</td></tr>
+    <tr><td>サブネット（リージョン）</td><td>サブネット（AZ）</td><td>GCP のサブネットはリージョンのすべてのゾーンにまたがる。パブリック／プライベートの区別はない</td></tr>
+    <tr><td>VPC ファイアウォール ルール</td><td>セキュリティ グループ（＋ネットワーク ACL）</td><td>GCP はネットワークで定義し、タグやサービスアカウントで VM を選ぶ。deny も書ける</td></tr>
+    <tr><td>Cloud NAT</td><td>NAT ゲートウェイ</td><td>GCP は Cloud Router 上に構成し、専用のサブネットは不要</td></tr>
+    <tr><td>IAP による TCP 転送</td><td>Systems Manager Session Manager</td><td>どちらも踏み台なしで接続できる</td></tr>
+    <tr><td>共有 VPC</td><td>VPC の共有（AWS RAM）</td><td>GCP は組織の中でホスト／サービス プロジェクトを決める</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ============================================================ -->
+<h2>10. テックリードの視点</h2>
+<div class="callout lead-tip">
+<strong>参画したら確認したいこと</strong>
+<ul class="check">
+  <li>共有 VPC を使っているか。ホスト プロジェクトはどれで、ネットワークの変更は誰に依頼するか</li>
+  <li>サブネットの IP アドレス範囲の計画。オンプレミスやオフショア拠点との VPN がある場合、範囲が重なっていないか</li>
+  <li>デフォルト ネットワークが残っていないか。<code>0.0.0.0/0</code> から許可しているファイアウォール ルールがないか</li>
+  <li>VM に外部 IP アドレスを付けてよいか（組織ポリシー）。SSH は IAP で行うルールか</li>
+  <li>Cloud Run などから VPC の中のリソースにどう接続しているか</li>
+</ul>
+</div>
+<p>オフショアのチームに説明するときは、図4のような「どこから・どこへ・何を通って」の図を1枚用意すると、ファイアウォール ルールの追加の依頼や、接続できないときの切り分けが速くなります。</p>
+
+<!-- ============================================================ -->
+<h2>11. ハンズオン：カスタムモードの VPC ネットワークを作る</h2>
+<p>学習用の configuration を有効にしたターミナルで実行します（<code>export CLOUDSDK_ACTIVE_CONFIG_NAME=study</code>）。プロジェクトはその configuration の設定が使われるので、<code>PROJECT_ID</code> の置き換えは不要です。</p>
+<p><strong>料金について</strong>：VPC ネットワーク、サブネット、ファイアウォール ルールの作成に料金はかかりません（料金がかかるのは、外部 IP アドレス、データ転送、Cloud NAT などです）。このハンズオンでは VM、外部 IP アドレス、Cloud NAT は作りません。最後に、作ったものを削除します。</p>
+
+<h3>手順1. Compute Engine API を有効にする</h3>
+<pre><code>gcloud services enable compute.googleapis.com</code></pre>
+<p>有効にするだけでは料金はかかりません。完了まで1分ほどかかることがあります。</p>
+
+<h3>手順2. デフォルト ネットワークを観察する（読み取りのみ）</h3>
+<pre><code># VPC ネットワークの一覧
+gcloud compute networks list
+
+# 東京リージョンにある、デフォルト ネットワークのサブネット
+gcloud compute networks subnets list --network=default --regions=asia-northeast1
+
+# ファイアウォール ルールの一覧と、SSH のルールの中身
+gcloud compute firewall-rules list
+gcloud compute firewall-rules describe default-allow-ssh</code></pre>
+
+<h3>手順3. カスタムモードの VPC ネットワークとサブネットを作る</h3>
+<pre><code># カスタムモードの VPC ネットワーク（--subnet-mode を省略すると自動モードになる）
+gcloud compute networks create study-vpc --subnet-mode=custom
+
+# 東京リージョンにサブネットを作る。限定公開の Google アクセスも有効にする
+gcloud compute networks subnets create study-subnet \
+  --network=study-vpc \
+  --region=asia-northeast1 \
+  --range=10.10.0.0/24 \
+  --enable-private-ip-google-access</code></pre>
+
+<h3>手順4. IAP からの SSH だけを許可するファイアウォール ルールを作る</h3>
+<pre><code>gcloud compute firewall-rules create study-allow-ssh-from-iap \
+  --network=study-vpc \
+  --direction=INGRESS \
+  --action=ALLOW \
+  --rules=tcp:22 \
+  --source-ranges=35.235.240.0/20 \
+  --target-tags=ssh-iap</code></pre>
+<p><code>--network</code> と <code>--source-ranges</code> は省略しないでください。省略すると、<code>default</code> ネットワークに、送信元 <code>0.0.0.0/0</code> のルールが作られます。</p>
+
+<h3>手順5. 作ったものを確認する（読み取りのみ）</h3>
+<pre><code>gcloud compute networks subnets describe study-subnet --region=asia-northeast1
+gcloud compute firewall-rules describe study-allow-ssh-from-iap
+
+# study-vpc のルート
+gcloud compute routes list --filter="network ~ /study-vpc$"</code></pre>
+
+<h3>手順6. 片付ける（この順番で）</h3>
+<pre><code># ① ファイアウォール ルール
+gcloud compute firewall-rules delete study-allow-ssh-from-iap
+
+# ② サブネット
+gcloud compute networks subnets delete study-subnet --region=asia-northeast1
+
+# ③ VPC ネットワーク
+gcloud compute networks delete study-vpc</code></pre>
+<p>VPC ネットワークは、中にサブネットやファイアウォール ルールが残っていると削除できません。そのため、中身から順に削除します。デフォルト ネットワークは、この学習用プロジェクトでは VM を作らない限り害はないので、そのまま残します。</p>
+
+<div class="quiz">
+<p class="q">Q1. 手順2で、<code>default-allow-ssh</code> の <code>sourceRanges</code> は何になっていたでしょう？それは何を意味するでしょう？</p>
+<details><summary>答えを見る</summary>
+<p><code>0.0.0.0/0</code> です。外部 IP アドレスを付けた VM をデフォルト ネットワークに作ると、インターネットのどこからでも SSH の接続を試せる状態になります。#1 の「外部 IP を禁止する」組織ポリシーや、この回の5節の構成（外部 IP なし＋IAP）が必要な理由です。</p>
+</details>
+
+<p class="q">Q2. 手順5のルートの一覧には、何が表示されたでしょう？自分では作っていないルートがあるのはなぜでしょう？</p>
+<details><summary>答えを見る</summary>
+<p>宛先 <code>0.0.0.0/0</code>、次のホップが <code>default-internet-gateway</code> のデフォルト ルートと、宛先がサブネットの範囲（<code>10.10.0.0/24</code>）のサブネット ルートです。どちらも、VPC ネットワークやサブネットを作ると自動で作られます（6節）。</p>
+</details>
+
+<p class="q">Q3. 手順5のサブネットの情報で、<code>privateIpGoogleAccess</code> と <code>gatewayAddress</code> はどうなっていたでしょう？</p>
+<details><summary>答えを見る</summary>
+<p><code>privateIpGoogleAccess: true</code> は、限定公開の Google アクセスが有効という意味です（手順3で指定したもの）。<code>gatewayAddress: 10.10.0.1</code> は、範囲の2番目のアドレスがデフォルト ゲートウェイとして使われていることを示しています（1節の「VM に割り当てられない4つのアドレス」の1つ）。</p>
+</details>
+</div>
+
+<!-- ============================================================ -->
+<h2>12. 確認テスト（ACE 形式）</h2>
+<div class="quiz">
+
+<p class="q">問1. セキュリティ チームから、本番プロジェクトの VM にインターネットのどこからでも SSH の接続を試せる状態になっていると指摘されました。VM はデフォルト ネットワークにあり、外部 IP アドレスを持っています。SSH が必要なのは運用チームだけです。Google が推奨する方法に従い、VM に外部 IP アドレスを付けずに運用したいと考えています。どうすればよいですか。</p>
+<ol class="choices">
+  <li><code>default-allow-ssh</code> の送信元を、運用チームのオフィスの IP アドレスに変更する</li>
+  <li>VM の外部 IP アドレスを削除し、<code>35.235.240.0/20</code> からの TCP 22 を許可するファイアウォール ルールを作成する。運用チームのグループに IAP で保護されたトンネル ユーザー（<code>roles/iap.tunnelResourceAccessor</code>）を付与し、IAP を通して SSH する</li>
+  <li>VM の外部 IP アドレスを削除し、Cloud NAT を構成して、運用チームが Cloud NAT を通して SSH する</li>
+  <li>外部 IP アドレスを持つ踏み台 VM を作成し、運用チームはそこを経由して SSH する</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>IAP による TCP 転送なら、VM に外部 IP アドレスがなくても SSH できます。IAP からの通信は <code>35.235.240.0/20</code> から届くので、この範囲だけを許可します。誰が使えるかは IAM（<code>roles/iap.tunnelResourceAccessor</code>）で制御します。</p>
+<ul>
+  <li><strong>A</strong>：送信元を絞ることはできますが、外部 IP アドレスが残るので、条件を満たしません</li>
+  <li><strong>C</strong>：Cloud NAT は VM から外への通信のためのもので、外から始まる接続は通しません</li>
+  <li><strong>D</strong>：外部 IP アドレスを持つ VM が新たに増え、その VM の管理も必要になります</li>
+</ul>
+</details>
+
+<p class="q">問2. 外部 IP アドレスを持たない VM が、インターネット上のリポジトリから OS の更新プログラムをダウンロードする必要があります。VM に外部 IP アドレスを付けることは、組織ポリシーで禁止されています。どうすればよいですか。</p>
+<ol class="choices">
+  <li>VM のサブネットで、限定公開の Google アクセスを有効にする</li>
+  <li>VM と同じリージョンに Cloud Router を作成し、Cloud NAT を構成する</li>
+  <li>宛先 <code>0.0.0.0/0</code> への下り（外向き）の通信を許可するファイアウォール ルールを作成する</li>
+  <li>VM に静的外部 IP アドレスを予約して割り当てる</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>外部 IP アドレスのない VM がインターネットへ出るには、Cloud NAT を使います。Cloud NAT はリージョンごとに、Cloud Router 上に構成します。</p>
+<ul>
+  <li><strong>A</strong>：限定公開の Google アクセスで届くのは Google の API とサービスだけで、インターネット上のリポジトリには届きません</li>
+  <li><strong>C</strong>：下り（外向き）は暗黙的に許可されているので、ルールを足しても変わりません。外部 IP アドレスも NAT もないことが原因です</li>
+  <li><strong>D</strong>：組織ポリシーで禁止されています</li>
+</ul>
+</details>
+
+<p class="q">問3. 外部 IP アドレスを持たない VM で動くバッチ処理が、Cloud Storage のバケットにファイルを書き込む必要があります。会社の方針で、この VM からインターネット上のサービスへの通信は許可されていません。最も適切な方法はどれですか。</p>
+<ol class="choices">
+  <li>VM のサブネットで、限定公開の Google アクセスを有効にする</li>
+  <li>Cloud NAT を構成する</li>
+  <li>VM にエフェメラル外部 IP アドレスを付ける</li>
+  <li>VPC ネットワーク ピアリングで、Cloud Storage のネットワークと接続する</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：A</strong></p>
+<p>限定公開の Google アクセスを有効にすると、外部 IP アドレスのない VM が、Cloud Storage などの Google API を使えるようになります。インターネット上のほかのサービスへは出られないので、方針にも合います。</p>
+<p>B と C は Cloud Storage に届きますが、インターネット全体へ出られるようになり、方針に反します。D のような方法はありません。</p>
+</details>
+
+<p class="q">問4. VPC ネットワークに、すべての送信元からの上り（内向き）の通信を拒否する、優先度 1000 のファイアウォール ルールがあります。ネットワーク タグ <code>web</code> を持つ VM に TCP 80 を許可するため、優先度 1000 の allow ルールを追加しましたが、通信が届きません。どうすればよいですか。</p>
+<ol class="choices">
+  <li>allow ルールの優先度を 900 に変更する</li>
+  <li>allow ルールの優先度を 1100 に変更する</li>
+  <li>下り（外向き）の TCP 80 を許可するルールを追加する</li>
+  <li>暗黙的に上り（内向き）を拒否するルールを削除する</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：A</strong></p>
+<p>優先度が同じとき、deny は allow より優先されます。allow ルールの数値を deny ルールより小さくすれば、先に評価されて許可されます。</p>
+<ul>
+  <li><strong>B</strong>：数値が大きいほど優先度は低いので、deny ルールが先に一致したままです</li>
+  <li><strong>C</strong>：ファイアウォール ルールはステートフルなので、許可された通信の戻りのために下りのルールは不要です</li>
+  <li><strong>D</strong>：暗黙的なアクションは、どのルールにも一致しなかったときの最後のステップで、ルールの一覧にあるものではありません。そもそも原因は優先度 1000 の deny ルールです</li>
+</ul>
+</details>
+
+<p class="q">問5. 新しいアプリケーションのために VPC ネットワークを作成します。東京と大阪のリージョンにだけサブネットが必要です。このネットワークは、<code>10.128.0.0/16</code> を使っているオンプレミスのネットワークと、後で VPN で接続する予定です。どうすればよいですか。</p>
+<ol class="choices">
+  <li>自動モードの VPC ネットワークを作成する</li>
+  <li>デフォルト ネットワークを使う</li>
+  <li>カスタムモードの VPC ネットワークを作成し、東京と大阪のリージョンに、オンプレミスと重ならない範囲でサブネットを作成する</li>
+  <li>リージョンごとに別々の VPC ネットワークを作成し、VPC ネットワーク ピアリングで接続する</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：C</strong></p>
+<p>カスタムモードなら、必要なリージョンにだけ、範囲を自分で決めてサブネットを作れます。</p>
+<ul>
+  <li><strong>A と B</strong>：自動モード（デフォルト ネットワークも自動モード）は、すべてのリージョンに <code>10.128.0.0/9</code> の中の範囲でサブネットを作ります。オンプレミスの <code>10.128.0.0/16</code> と重なるおそれがあり、不要なリージョンにもサブネットができます</li>
+  <li><strong>D</strong>：VPC ネットワークはグローバルなので、1つのネットワークに東京と大阪のサブネットを作れます。分ける必要はありません</li>
+</ul>
+</details>
+
+<p class="q">問6. 会社では、本番環境のシステムを Web チームのプロジェクトと API チームのプロジェクトに分けています。Web の VM から API の VM へは内部 IP アドレスで通信します。ネットワーク（サブネットやファイアウォール ルール）はネットワーク チームが一元管理し、各チームは自分のプロジェクトで VM を管理するようにしたいと考えています。プロジェクトはすべて同じ組織にあります。どうすればよいですか。</p>
+<ol class="choices">
+  <li>各プロジェクトに VPC ネットワークを作成し、VPC ネットワーク ピアリングで相互に接続する</li>
+  <li>ネットワーク チームのプロジェクトをホスト プロジェクトにして共有 VPC を構成し、Web と API のプロジェクトをサービス プロジェクトとして接続する</li>
+  <li>すべての VM を1つのプロジェクトにまとめ、ネットワーク チームにそのプロジェクトのオーナーを付与する</li>
+  <li>各プロジェクトのデフォルト ネットワークを使い、ネットワーク チームに各プロジェクトの編集者を付与する</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>共有 VPC は、ネットワークをホスト プロジェクトで一元管理し、リソースはサービス プロジェクトで管理する仕組みです。</p>
+<ul>
+  <li><strong>A</strong>：ネットワークはプロジェクトごとに別々になり、一元管理になりません。ピアリングは推移的でもありません</li>
+  <li><strong>C</strong>：プロジェクトを分けている意味がなくなり、権限も広すぎます</li>
+  <li><strong>D</strong>：デフォルト ネットワークは本番に向かず、編集者は権限が広すぎます</li>
+</ul>
+</details>
+
+<p class="q">問7. サブネット <code>10.10.0.0/24</code> の IP アドレスが足りなくなりました。既存の VM を作り直さずに、使える IP アドレスを増やしたいと考えています。どうすればよいですか。</p>
+<ol class="choices">
+  <li><code>gcloud compute networks subnets expand-ip-range</code> で、プレフィックス長を <code>/23</code> にする</li>
+  <li>サブネットの範囲を <code>10.20.0.0/24</code> に置き換える</li>
+  <li>VPC ネットワークを自動モードに変更する</li>
+  <li>サブネットを削除して、<code>/23</code> で作り直す</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：A</strong></p>
+<p>サブネットのプライマリ IPv4 範囲は、作成後に広げることができます。<code>/24</code> を <code>/23</code> にすると、アドレスの数は2倍になります。</p>
+<p>B のような置き換えや、範囲を狭めることはできません。C のカスタムモードから自動モードへの変更はできません。D は VM の作り直しが必要になります。</p>
+</details>
+</div>
+
+<!-- ============================================================ -->
+<h2>まとめ</h2>
+<ul>
+  <li>VPC ネットワークはグローバル、サブネットはリージョン。リージョンが違っても、同じネットワークの VM は内部 IP で通信できる</li>
+  <li>本番はカスタムモード。デフォルト ネットワークは <code>0.0.0.0/0</code> から SSH・RDP・ICMP を許可しているので使わない</li>
+  <li>ファイアウォール ルールは、優先度の数値が小さい順に評価し、最初に一致したもので決まる。同じ優先度なら deny が優先。どれにも一致しなければ、上りは拒否・下りは許可。ステートフル</li>
+  <li>外部 IP アドレスは使用中も課金される。外部 IP なしで、外へは Cloud NAT、Google API へは限定公開の Google アクセス、SSH は IAP</li>
+  <li>プロジェクトをまたぐなら、一元管理は共有 VPC、別々のネットワークをつなぐなら VPC ネットワーク ピアリング（推移的ではない）</li>
+  <li>Cloud Run は VPC の外で動く。VPC の中のリソースに接続するには、ダイレクト VPC 下り（外向き）などの設定が必要</li>
+</ul>
+<p>次回：<strong>#4 実行環境の選び方</strong>（Compute Engine / Cloud Run / GKE / App Engine / Cloud Run functions の使い分け）</p>
+
+<p class="lead">参考（公式ドキュメント）：<a href="https://cloud.google.com/vpc/docs/vpc">VPC ネットワーク</a>　／　<a href="https://cloud.google.com/vpc/docs/subnets">サブネット</a>　／　<a href="https://cloud.google.com/firewall/docs/firewalls">VPC ファイアウォール ルール</a>　／　<a href="https://cloud.google.com/nat/docs/overview">Cloud NAT</a>　／　<a href="https://cloud.google.com/iap/docs/using-tcp-forwarding">IAP による TCP 転送</a>　／　<a href="https://cloud.google.com/vpc/docs/private-google-access">限定公開の Google アクセス</a>　／　<a href="https://cloud.google.com/vpc/docs/shared-vpc">共有 VPC</a>　／　<a href="https://cloud.google.com/vpc/docs/vpc-peering">VPC ネットワーク ピアリング</a></p>
+
+<footer><a href="../index.html">← ロードマップに戻る</a>　｜　最終更新：2026-11-19</footer>
+</main>
+</body>
+</html>

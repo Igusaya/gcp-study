@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#2 IAM | GCP 学習</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<!-- 矢印の定義（ページ内の全 SVG で共有） -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="d-arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+    <marker id="arr-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="d-arrowhead-ok" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+</svg>
+
+<main>
+<p class="breadcrumb"><a href="../index.html">← ロードマップ</a>　｜　<a href="01-resource-hierarchy.html">← #1 リソース階層と課金</a></p>
+<h1>#2 IAM</h1>
+<p class="lead">「誰に・何を・どこで」許可するかの仕組みと、アプリに権限を与えるサービスアカウントを理解する</p>
+
+<div class="card">
+<strong>この回のゴール</strong>
+<ul>
+  <li>IAM の3つの要素（プリンシパル・ロール・許可ポリシー）を説明できる</li>
+  <li>基本ロール・事前定義ロール・カスタムロールの違いと使い分けを説明できる</li>
+  <li>拒否ポリシーがいつ・どう効くかを説明できる</li>
+  <li>サービスアカウントの役割と、安全な使い方を説明できる</li>
+  <li>最小権限の考え方で、ロールの付与を設計できる</li>
+</ul>
+</div>
+
+<!-- ============================================================ -->
+<h2>1. IAM は「誰に・何を・どこで」</h2>
+<p>IAM（Identity and Access Management）は、<strong>誰に（プリンシパル）</strong>、<strong>何を（ロール）</strong>許可するかを、<strong>どこで（許可ポリシーを付けたリソース）</strong>有効にするかを決める仕組みです。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 300" role="img" aria-labelledby="f1-title">
+  <title id="f1-title">IAMの3つの要素：プリンシパルとロールの組み合わせがロール バインディング。ロール バインディングを並べたものが許可ポリシーで、許可ポリシーはリソースに付ける</title>
+  <!-- 誰に -->
+  <rect class="d-accent" x="20" y="30" width="220" height="110" rx="10"/>
+  <text class="d-t d-b" x="130" y="58" text-anchor="middle">プリンシパル（誰に）</text>
+  <text class="d-s" x="130" y="84" text-anchor="middle">user:alex@example.com</text>
+  <text class="d-s" x="130" y="104" text-anchor="middle">group:dev@example.com</text>
+  <text class="d-s" x="130" y="124" text-anchor="middle">serviceAccount:…</text>
+  <!-- 何を -->
+  <rect class="d-ok" x="20" y="160" width="220" height="110" rx="10"/>
+  <text class="d-t d-b" x="130" y="188" text-anchor="middle">ロール（何を）</text>
+  <text class="d-s" x="130" y="214" text-anchor="middle">権限（permission）の束</text>
+  <text class="d-s" x="130" y="238" text-anchor="middle">例：roles/run.invoker</text>
+
+
+  <!-- 許可ポリシー -->
+  <rect class="d-box" x="300" y="20" width="300" height="260" rx="12"/>
+  <text class="d-t d-b" x="450" y="48" text-anchor="middle">許可ポリシー（allow policy）</text>
+  <rect class="d-note" x="330" y="70" width="240" height="90" rx="8"/>
+  <text class="d-s d-b" x="450" y="92" text-anchor="middle">ロール バインディング</text>
+  <text class="d-s" x="450" y="116" text-anchor="middle">role: roles/run.invoker</text>
+  <text class="d-s" x="450" y="138" text-anchor="middle">members: group:dev@…</text>
+  <rect class="d-note" x="330" y="172" width="240" height="70" rx="8"/>
+  <text class="d-s d-b" x="450" y="196" text-anchor="middle">ロール バインディング</text>
+  <text class="d-s" x="450" y="220" text-anchor="middle">role: … / members: …</text>
+  <text class="d-s" x="450" y="266" text-anchor="middle">… いくつでも並べられる</text>
+  <path class="d-line" d="M240,85 L326,108" marker-end="url(#arr)"/>
+  <path class="d-line" d="M240,215 L326,130" marker-end="url(#arr)"/>
+
+  <!-- どこで -->
+  <path class="d-line" d="M600,150 L630,150" marker-end="url(#arr)"/>
+  <text class="d-s" x="615" y="140" text-anchor="middle">付ける</text>
+  <rect class="d-accent" x="634" y="80" width="178" height="140" rx="10"/>
+  <text class="d-t d-b" x="723" y="108" text-anchor="middle">リソース</text>
+  <text class="d-t d-b" x="723" y="128" text-anchor="middle">（どこで）</text>
+  <text class="d-s" x="723" y="156" text-anchor="middle">組織 / フォルダ /</text>
+  <text class="d-s" x="723" y="176" text-anchor="middle">プロジェクト /</text>
+  <text class="d-s" x="723" y="196" text-anchor="middle">一部のサービスのリソース</text>
+</svg>
+<figcaption>図1：プリンシパルとロールの組み合わせ（ロール バインディング）を並べたものが許可ポリシー。許可ポリシーはリソースに付ける</figcaption>
+</figure>
+
+<div class="callout">
+<strong>AWS 経験者が間違えやすいポイント</strong>
+AWS では、ポリシーを主にユーザーやロール（人やアプリの側）に付けます。GCP の許可ポリシーは<strong>リソースの側</strong>に付けます。「このプロジェクトでは、誰に、どのロールを与えるか」という書き方です。
+</div>
+
+<!-- ============================================================ -->
+<h2>2. プリンシパル（誰に）</h2>
+<p>許可ポリシーの中では、プリンシパルを「種類:識別子」の形で書きます。</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>種類</th><th>書き方の例</th><th>使いどころ</th></tr></thead>
+  <tbody>
+    <tr><td>Google アカウント</td><td><code>user:alex@example.com</code></td><td>個人。実務では直接付与せず、グループ経由にするのが基本</td></tr>
+    <tr><td>Google グループ</td><td><code>group:dev@example.com</code></td><td><strong>チーム単位の付与はこれ</strong>。メンバーの増減は、ポリシーを変えずにグループ側で管理できる</td></tr>
+    <tr><td>サービスアカウント</td><td><code>serviceAccount:app@PROJECT_ID.iam.gserviceaccount.com</code></td><td>アプリやワークロードの身元（項番5）</td></tr>
+    <tr><td>ドメイン</td><td><code>domain:example.com</code></td><td>Google Workspace / Cloud Identity のドメインに属する全員</td></tr>
+    <tr><td>認証済みの全ユーザー</td><td><code>allAuthenticatedUsers</code></td><td>Google アカウントでログインした人なら誰でも。<strong>社外の人も含む</strong></td></tr>
+    <tr><td>全ユーザー</td><td><code>allUsers</code></td><td>インターネット上の誰でも（ログイン不要）。<strong>公開してよいものだけ</strong></td></tr>
+  </tbody>
+</table>
+</div>
+<p>ほかに、社外の ID プロバイダの ID を使う Workforce Identity 連携・Workload Identity 連携のプリンシパル（<code>principal://…</code>）などもあります。</p>
+
+<div class="callout warn">
+<strong>allUsers と allAuthenticatedUsers に注意</strong>
+<code>allAuthenticatedUsers</code> は「自社の社員」ではなく、<strong>Google アカウントを持つ世界中の誰でも</strong>という意味です。バケットの情報漏えい事故の原因になりやすいので、付与する前に必ず確認しましょう。
+</div>
+
+<!-- ============================================================ -->
+<h2>3. ロール（何を）</h2>
+<p>権限（permission）は <code>サービス.リソース.動詞</code>（公式表記は <code>SERVICE.RESOURCE.VERB</code>）の形をしています。例：<code>storage.objects.get</code>。<strong>権限をユーザーに直接付与することはできず、必ずロールにまとめて付与します。</strong></p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 320" role="img" aria-labelledby="f2-title">
+  <title id="f2-title">ロールの3種類：基本ロールは非常に範囲が広い、事前定義ロールはサービスごとにGoogleが用意、カスタムロールは必要な権限を自分で選ぶ</title>
+  <rect class="d-box" x="20" y="16" width="780" height="54" rx="10"/>
+  <text class="d-t d-b" x="410" y="40" text-anchor="middle">権限（permission）：サービス.リソース.動詞</text>
+  <text class="d-s" x="410" y="60" text-anchor="middle">例：storage.objects.get ／ compute.instances.create ／ run.routes.invoke</text>
+  <path class="d-line" d="M410,70 L410,100" marker-end="url(#arr)"/>
+  <text class="d-s d-b" x="420" y="90">束ねたもの ＝ ロール</text>
+
+  <!-- 基本ロール -->
+  <rect class="d-warn" x="20" y="108" width="245" height="196" rx="10"/>
+  <text class="d-t d-b d-c-warn" x="142" y="136" text-anchor="middle">基本ロール</text>
+  <text class="d-s" x="142" y="162" text-anchor="middle">管理者 / 書き込み / 読み取り</text>
+  <rect class="d-warn" x="40" y="178" width="205" height="16" rx="3"/>
+  <text class="d-s" x="142" y="212" text-anchor="middle">従来：オーナー / 編集者 / 閲覧者</text>
+  <text class="d-s" x="142" y="234" text-anchor="middle">読み取りだけで約6,350の権限</text>
+  <text class="d-s" x="142" y="256" text-anchor="middle">すべてのサービスにまたがる</text>
+  <text class="d-t d-b d-c-warn" x="142" y="280" text-anchor="middle">本番では原則使わない</text>
+
+  <!-- 事前定義ロール -->
+  <rect class="d-accent" x="287" y="108" width="245" height="196" rx="10"/>
+  <text class="d-t d-b d-c-accent" x="410" y="136" text-anchor="middle">事前定義ロール</text>
+  <text class="d-s" x="410" y="162" text-anchor="middle">Google がサービスごとに用意・管理</text>
+  <rect class="d-accent" x="307" y="178" width="40" height="16" rx="3"/>
+  <text class="d-s" x="410" y="216" text-anchor="middle">例：Storage オブジェクト閲覧者</text>
+  <text class="d-s" x="410" y="240" text-anchor="middle">roles/storage.objectViewer（8つ）</text>
+  <text class="d-t d-b d-c-accent" x="410" y="280" text-anchor="middle">まずはここから選ぶ</text>
+
+  <!-- カスタムロール -->
+  <rect class="d-ok" x="554" y="108" width="246" height="196" rx="10"/>
+  <text class="d-t d-b d-c-ok" x="677" y="136" text-anchor="middle">カスタムロール</text>
+  <text class="d-s" x="677" y="162" text-anchor="middle">必要な権限を自分で選んで作る</text>
+  <rect class="d-ok" x="574" y="178" width="20" height="16" rx="3"/>
+  <text class="d-s" x="677" y="216" text-anchor="middle">組織またはプロジェクトで作成</text>
+  <text class="d-s" x="677" y="240" text-anchor="middle">（フォルダでは作れない）</text>
+  <text class="d-t d-b d-c-ok" x="677" y="280" text-anchor="middle">合うものがないときに</text>
+</svg>
+<figcaption>図2：ロールの3種類。帯の長さは権限の多さのイメージ（権限の数は 2026-11 時点で実際に確認した値）</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th></th><th>基本ロール</th><th>事前定義ロール</th><th>カスタムロール</th></tr></thead>
+  <tbody>
+    <tr><td>例</td><td><code>roles/admin</code><br><code>roles/writer</code><br><code>roles/reader</code><br>（従来）<br><code>roles/owner</code><br><code>roles/editor</code><br><code>roles/viewer</code></td><td><code>roles/run.invoker</code><br><code>roles/storage.objectViewer</code></td><td><code>projects/PROJECT_ID/roles/myRole</code><br><code>organizations/ORG_ID/roles/myRole</code></td></tr>
+    <tr><td>誰が管理</td><td>Google</td><td>Google（新機能に合わせて権限が追加される）</td><td>自分（権限の追加や変更も自分で行う）</td></tr>
+    <tr><td>範囲</td><td>非常に広い</td><td>サービスや用途ごとに細かい</td><td>選んだ権限だけ</td></tr>
+    <tr><td>作れる場所</td><td>―</td><td>―</td><td>組織またはプロジェクト。<strong>フォルダでは作れない</strong>。作った組織やプロジェクトの中でしか付与できない</td></tr>
+    <tr><td>条件（項番4）</td><td>付けられる。<strong>従来の基本ロールは不可</strong></td><td>付けられる</td><td>付けられる</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>基本ロールの新旧</h3>
+<p>基本ロールには、新しい3つと、IAM ができる前からある<strong>従来の基本ロール（legacy basic roles）</strong>の3つがあります。どちらも現在使えます。権限の数は新旧でほぼ同じです（2026-11 時点で確認した値）。</p>
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th>できること</th><th>基本ロール</th><th>従来の基本ロール</th><th>権限の数</th></tr></thead>
+  <tbody>
+    <tr><td>見るだけ</td><td>読み取り（<code>roles/reader</code>）</td><td>閲覧者（<code>roles/viewer</code>）</td><td>約6,350</td></tr>
+    <tr><td>ほとんどのリソースの作成・変更・削除</td><td>書き込み（<code>roles/writer</code>）</td><td>編集者（<code>roles/editor</code>）</td><td>約12,500</td></tr>
+    <tr><td>上に加えて、IAM（ロールの付与）や課金の設定</td><td>管理者（<code>roles/admin</code>）</td><td>オーナー（<code>roles/owner</code>）</td><td>約14,200</td></tr>
+  </tbody>
+</table>
+</div>
+<ul>
+  <li>公式ドキュメントは、基本ロールを使うなら<strong>新しいほう（管理者・書き込み・読み取り）</strong>を勧めている。条件を付けられるなど、使える機能が多いため</li>
+  <li>従来の基本ロールも現役。たとえば、プロジェクトを作った人には自動でオーナーが付与される（#1 のハンズオンで確認した <code>roles/owner</code>）</li>
+  <li>管理者やオーナーでも、拒否ポリシーの作成や、Cloud Billing のお支払い情報の変更はできない</li>
+  <li>どちらにしても範囲が広いので、<strong>本番では基本ロールを原則使わない</strong>という方針は変わらない</li>
+</ul>
+
+<div class="callout ace">
+<strong>ACE のポイント</strong>
+<ul>
+  <li>公式ドキュメントには「本番環境では、ほかに方法がない場合を除き、基本ロールを付与しない」とある</li>
+  <li>ロールを選ぶ順番は、<strong>事前定義ロール → 合うものがなければカスタムロール</strong></li>
+  <li>カスタムロールは、組織またはプロジェクトで作る。<strong>「フォルダでカスタムロールを作る」選択肢は誤り</strong></li>
+  <li>オーナー（管理者）は、IAM ポリシーの変更も含めてほぼすべてを操作できる。編集者（書き込み）は、ほとんどのリソースを変更できるが、IAM ポリシーは変更できない</li>
+  <li>問題文や選択肢には、従来の名前（オーナー・編集者・閲覧者）と新しい名前（管理者・書き込み・読み取り）のどちらが出ても読めるようにしておく</li>
+</ul>
+</div>
+
+<!-- ============================================================ -->
+<h2>4. 許可ポリシーの中身</h2>
+<p>許可ポリシーは YAML または JSON のオブジェクトで、<strong>ロール バインディングのリスト</strong>が入っています。#1 のハンズオンで <code>gcloud projects get-iam-policy</code> を実行したときに表示されたのが、プロジェクトに付いている許可ポリシーです。</p>
+
+<pre><code>bindings:
+- role: roles/run.invoker            # 何を
+  members:                           # 誰に（複数書ける）
+  - group:dev@example.com
+  - serviceAccount:app@PROJECT_ID.iam.gserviceaccount.com
+- role: roles/storage.objectViewer
+  members:
+  - user:alex@example.com
+  condition:                         # 条件（任意）
+    title: expires-end-of-2026
+    expression: request.time &lt; timestamp("2027-01-01T00:00:00Z")
+etag: BwXXXXXXXXXX=                  # 同時に更新したときの競合を防ぐための値
+version: 3</code></pre>
+
+<ul>
+  <li><strong>ロール バインディング</strong>：1つのロールと、それを与えるプリンシパルのリスト</li>
+  <li><strong>条件（IAM Conditions）</strong>：「期限まで」「特定の名前のリソースだけ」などの条件を付けられる。<strong>従来の基本ロール（オーナー・編集者・閲覧者）には条件を付けられない</strong></li>
+  <li><strong>etag</strong>：ほかの人が同時にポリシーを書き換えたときに、上書き事故を防ぐための値</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>5. 拒否ポリシー：許可より先に判定される</h2>
+<p>許可ポリシーは足し算です。上の階層で付与された権限は、下の階層の許可ポリシーでは取り消せません（#1）。そこで、「誰がどんなロールを持っていても、この操作だけはさせない」というガードレールを作るのが<strong>拒否ポリシー（deny policies）</strong>です。</p>
+
+<figure class="diagram">
+<svg viewBox="0 66 820 196" role="img" aria-labelledby="f3-title">
+  <title id="f3-title">IAM は拒否ポリシーを先に確認する。該当する拒否ルールがあれば拒否。なければ許可ポリシーを確認し、必要な権限を持っていれば許可、持っていなければ拒否</title>
+  <rect class="d-box" x="10" y="100" width="130" height="50" rx="10"/>
+  <text class="d-t d-b" x="75" y="122" text-anchor="middle">リクエスト</text>
+  <text class="d-s" x="75" y="141" text-anchor="middle">誰が・どの権限で</text>
+
+  <rect class="d-warn" x="200" y="80" width="220" height="90" rx="10"/>
+  <text class="d-t d-b" x="310" y="106" text-anchor="middle">① 拒否ポリシー</text>
+  <text class="d-s" x="310" y="130" text-anchor="middle">該当する拒否ルールがある？</text>
+  <text class="d-s" x="310" y="152" text-anchor="middle">（上の階層のものも含む）</text>
+
+  <rect class="d-accent" x="500" y="80" width="200" height="90" rx="10"/>
+  <text class="d-t d-b" x="600" y="106" text-anchor="middle">② 許可ポリシー</text>
+  <text class="d-s" x="600" y="130" text-anchor="middle">必要な権限を持っている？</text>
+  <text class="d-s" x="600" y="152" text-anchor="middle">（上の階層の分も合計）</text>
+
+  <rect class="d-ok" x="740" y="100" width="70" height="50" rx="10"/>
+  <text class="d-t d-b d-c-ok" x="775" y="131" text-anchor="middle">許可</text>
+
+  <rect class="d-warn" x="340" y="210" width="240" height="40" rx="10"/>
+  <text class="d-t d-b d-c-warn" x="460" y="236" text-anchor="middle">拒否</text>
+
+  <!-- 矢印（枠のあとに描く） -->
+  <path class="d-line" d="M140,125 L196,125" marker-end="url(#arr)"/>
+  <path class="d-line" d="M420,125 L496,125" marker-end="url(#arr)"/>
+  <text class="d-s" x="458" y="117" text-anchor="middle">ない</text>
+  <path class="d-line" d="M700,125 L736,125" marker-end="url(#arr)"/>
+  <text class="d-s" x="718" y="117" text-anchor="middle">持つ</text>
+  <path class="d-line" d="M330,170 L390,206" marker-end="url(#arr)"/>
+  <text class="d-s" x="345" y="200" text-anchor="end">ある</text>
+  <path class="d-line" d="M590,170 L530,206" marker-end="url(#arr)"/>
+  <text class="d-s" x="575" y="200">持っていない</text>
+</svg>
+<figcaption>図3：IAM は拒否ポリシーを先に確認する。拒否されたら、許可ポリシーでどんなロールを持っていても使えない</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th></th><th>許可ポリシー</th><th>拒否ポリシー</th></tr></thead>
+  <tbody>
+    <tr><td>役割</td><td>権限を与える</td><td>権限を使えなくする</td></tr>
+    <tr><td>付けられる場所</td><td>組織・フォルダ・プロジェクトのほか、バケットなど多くのサービスのリソース</td><td><strong>組織・フォルダ・プロジェクトだけ</strong></td></tr>
+    <tr><td>1つのリソースに</td><td>1つだけ</td><td>最大 500 個（拒否ルールは合計 500 個まで）</td></tr>
+    <tr><td>中身</td><td>ロール バインディング（ロール＋プリンシパル）</td><td>拒否ルール（プリンシパル＋<strong>権限</strong>。ロールではなく権限を直接書く）</td></tr>
+    <tr><td>権限の書き方</td><td><code>iam.roles.create</code></td><td><code>iam.googleapis.com/roles.create</code></td></tr>
+    <tr><td>プリンシパルの書き方</td><td><code>user:alex@example.com</code><br><code>group:admins@example.com</code></td><td><code>principal://goog/subject/alex@example.com</code><br><code>principalSet://goog/group/admins@example.com</code></td></tr>
+    <tr><td>継承</td><td>上の階層から引き継がれる</td><td>上の階層から引き継がれる</td></tr>
+    <tr><td>作成・変更に必要なロール</td><td>オーナー、セキュリティ管理者など</td><td>拒否管理者（<code>roles/iam.denyAdmin</code>）。組織で付与する。<strong>オーナーでも作れない</strong></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>拒否ポリシーは JSON で書きます。次の例は、「プロジェクトの削除は、project-admins グループ以外の全員に禁止する」というものです。</p>
+<pre><code>{
+  "displayName": "Only project admins can delete projects",
+  "rules": [
+    {
+      "denyRule": {
+        "deniedPrincipals": ["principalSet://goog/public:all"],
+        "exceptionPrincipals": ["principalSet://goog/group/project-admins@example.com"],
+        "deniedPermissions": ["cloudresourcemanager.googleapis.com/projects.delete"]
+      }
+    }
+  ]
+}</code></pre>
+<table class="kv">
+  <tbody>
+    <tr><td><code>deniedPrincipals</code></td><td>拒否する相手。<code>principalSet://goog/public:all</code> は全員</td></tr>
+    <tr><td><code>exceptionPrincipals</code></td><td>例外にする相手。ここでは project-admins グループ</td></tr>
+    <tr><td><code>deniedPermissions</code></td><td>拒否する権限。ここではプロジェクトの削除</td></tr>
+  </tbody>
+</table>
+
+<ul>
+  <li>拒否ルールは、<strong>拒否するプリンシパル</strong>、<strong>例外にするプリンシパル</strong>、<strong>拒否する権限</strong>、<strong>例外にする権限</strong>、<strong>拒否の条件</strong>（任意）でできている。拒否の条件で使えるのは、リソースのタグに関する条件だけ</li>
+  <li><strong>すべての権限を拒否できるわけではない</strong>。対象になる権限は公式ドキュメントの一覧で確認する</li>
+  <li>作成は <code>gcloud iam policies create POLICY_ID --attachment-point=… --kind=denypolicies --policy-file=…</code>。付け先（attachment point）は、プロジェクトなら <code>cloudresourcemanager.googleapis.com/projects/PROJECT_ID</code> の形で指定する</li>
+</ul>
+
+<div class="callout ace">
+<strong>ACE のポイント</strong>
+<ul>
+  <li>「上の階層で付与されたロールのうち、一部の権限だけを特定のプロジェクトで使わせたくない」→ 下の階層の許可ポリシーでは取り消せないので、<strong>拒否ポリシー</strong>を使う（または付与する階層を見直す）</li>
+  <li>拒否は許可より優先される。拒否ルールに該当すれば、オーナーなどの強いロールを持っていても使えない</li>
+  <li>「誰に」を決めるのが IAM（許可・拒否）、「どんな設定を許すか」を決めるのが組織ポリシー（#1）。拒否ポリシーと組織ポリシーを混同しない</li>
+</ul>
+</div>
+
+<div class="callout lead-tip">
+<strong>テックリードの視点：「ロールはあるのに Permission denied」</strong>
+拒否ポリシーは組織の管理者がガードレールとして設定するもので、プロジェクトの許可ポリシーを見ても表示されません。ロールを持っているはずなのに拒否される場合は、組織ポリシーとあわせて、上の階層の拒否ポリシーも疑います。拒否ポリシーの一覧は <code>gcloud iam policies list --attachment-point=… --kind=denypolicies</code> で確認できます（見るにはオーナーなどの閲覧権限が必要）。
+</div>
+
+<p class="lead">IAM には、このほかに Principal Access Boundary ポリシーなどの種類もあります。まずは許可ポリシーと拒否ポリシーを押さえれば十分です。</p>
+
+<!-- ============================================================ -->
+<h2>6. サービスアカウント：アプリの身元</h2>
+<p>サービスアカウントは、<strong>人ではなく、アプリケーションやワークロードが使うアカウント</strong>です。Cloud Run や VM で動くアプリが、バケットを読んだり別の API を呼んだりするときに、この身元で権限が判定されます。</p>
+
+<h3>6-1. サービスのリソースは「誰に」になれない</h3>
+<p>許可ポリシーの「誰に」に書けるのは、項番2の表のような<strong>身元（ID）</strong>だけです。Cloud Run サービスや VM そのものを書く種類はありません。そこで、コードを動かすサービスのリソースにはサービスアカウントを<strong>関連付け</strong>ます（attach。公式ドキュメントでは「接続されたサービス アカウント」と訳されている箇所もあります）。中で動くアプリは、関連付けられたサービスアカウントの短期の認証情報を自動で受け取ります。ほかのリソースにアクセスすると、Google Cloud からは「そのサービスアカウントからのリクエスト」に見えます。</p>
+<p>このため、同じ Cloud Run サービスでも、<strong>入ってくる通信と出ていく通信では、判定に使う許可ポリシーが違います</strong>。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 336" role="img" aria-labelledby="f4-title">
+  <title id="f4-title">入ってくる通信と出ていく通信。①開発者 alice が Cloud Run サービス A を呼び出せるかは、A の許可ポリシー（alice に roles/run.invoker）で判定する。②A のアプリがバケット B を読めるかは、B の許可ポリシー（app-sa に roles/storage.objectViewer）で判定する。アプリは A に関連付けられた app-sa の身元でアクセスする</title>
+  <!-- リソース -->
+  <rect class="d-accent" x="20" y="100" width="120" height="56" rx="10"/>
+  <text class="d-t" x="80" y="133" text-anchor="middle">開発者 alice</text>
+
+  <rect class="d-box" x="250" y="56" width="260" height="140" rx="10"/>
+  <text class="d-t d-b" x="380" y="82" text-anchor="middle">Cloud Run サービス A</text>
+  <rect class="d-ok" x="290" y="100" width="180" height="72" rx="8"/>
+  <text class="d-t d-b" x="380" y="130" text-anchor="middle">app-sa</text>
+  <text class="d-s" x="380" y="154" text-anchor="middle">関連付けられた身元</text>
+
+  <rect class="d-box" x="620" y="100" width="180" height="56" rx="10"/>
+  <text class="d-t" x="710" y="133" text-anchor="middle">バケット B</text>
+
+  <!-- 許可ポリシー -->
+  <rect class="d-note" x="200" y="236" width="340" height="88" rx="8"/>
+  <text class="d-s d-b" x="370" y="260" text-anchor="middle">A の許可ポリシー（どこで＝A）</text>
+  <text class="d-s" x="370" y="284" text-anchor="middle">誰に：開発者 alice</text>
+  <text class="d-s" x="370" y="306" text-anchor="middle">何を：roles/run.invoker</text>
+
+  <rect class="d-note" x="560" y="236" width="250" height="88" rx="8"/>
+  <text class="d-s d-b" x="685" y="260" text-anchor="middle">B の許可ポリシー（どこで＝B）</text>
+  <text class="d-s" x="685" y="284" text-anchor="middle">誰に：app-sa</text>
+  <text class="d-s" x="685" y="306" text-anchor="middle">何を：roles/storage.objectViewer</text>
+
+  <!-- 付いている（点線） -->
+  <line class="d-line d-dashed" x1="370" y1="196" x2="370" y2="236"/>
+  <text class="d-s" x="378" y="222">付いている</text>
+  <line class="d-line d-dashed" x1="700" y1="156" x2="700" y2="236"/>
+  <text class="d-s" x="708" y="200">付いている</text>
+
+  <!-- 通信（枠のあとに描く） -->
+  <path class="d-line" d="M140,128 L246,128" marker-end="url(#arr)"/>
+  <text class="d-s d-b" x="195" y="118" text-anchor="middle">① 呼び出す</text>
+  <text class="d-s" x="195" y="148" text-anchor="middle">入ってくる</text>
+  <path class="d-line-ok" d="M470,128 L616,128" marker-end="url(#arr-ok)"/>
+  <text class="d-s d-b" x="565" y="118" text-anchor="middle">② 読む</text>
+  <text class="d-s" x="565" y="148" text-anchor="middle">app-sa として</text>
+</svg>
+<figcaption>図4：①入ってくる通信は A 自身の許可ポリシーで判定する（app-sa は関係しない）。②出ていく通信は、関連付けられた app-sa が「誰に」になり、行き先 B の許可ポリシーで判定する</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>判定すること</th><th>どこで</th><th>誰に</th><th>何を</th></tr></thead>
+  <tbody>
+    <tr><td>① alice が A を呼び出せるか</td><td>Cloud Run サービス A</td><td>alice</td><td><code>roles/run.invoker</code></td></tr>
+    <tr><td>② A のアプリが B を読めるか</td><td>バケット B</td><td>app-sa</td><td><code>roles/storage.objectViewer</code></td></tr>
+  </tbody>
+</table>
+</div>
+<p>コマンドでも、許可ポリシーを付ける先（どこで）が違います。</p>
+<pre><code># ① A の許可ポリシーに付ける
+gcloud run services add-iam-policy-binding A \
+  --region=REGION --member=user:alice@example.com --role=roles/run.invoker
+
+# ② B の許可ポリシーに付ける
+gcloud storage buckets add-iam-policy-binding gs://B \
+  --member=serviceAccount:app-sa@PROJECT_ID.iam.gserviceaccount.com \
+  --role=roles/storage.objectViewer</code></pre>
+<ul>
+  <li>サービスアカウントを関連付けることができるのは、VM や Cloud Run のように<strong>自分でコードを動かすリソース</strong>。バケット、Pub/Sub トピック、Secret Manager のシークレットなどには関連付けない</li>
+  <li>リソースと身元が分かれているので、複数のサービスで同じサービスアカウントを使うことも、サービスごとに分けて権限を最小にすることもできる。監査ログには「どのサービスアカウントが操作したか」が残る</li>
+  <li>何も指定しないと、Cloud Run や VM には Compute Engine のデフォルトのサービスアカウントが使われる（6-3）</li>
+</ul>
+
+<h3>6-2. サービスアカウントの2つの顔</h3>
+<p>サービスアカウントは<strong>プリンシパル</strong>（権限を受け取る側）であり、同時に<strong>リソース</strong>（ほかのプリンシパルに、それを使う権限を与える対象）でもあります。ACE でよく問われるポイントです。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 400" role="img" aria-labelledby="f5-title">
+  <title id="f5-title">サービスアカウントの2つの顔。①プリンシパルとして：Cloud Run に関連付けられた app-sa が「誰に」に入り、バケットで roles/storage.objectViewer を持つ。②リソースとして：app-sa が「どこで」に入り、開発者 alice が app-sa に対して roles/iam.serviceAccountUser を持つ。これで alice は app-sa を Cloud Run に関連付けられる</title>
+
+  <!-- ① プリンシパルとして -->
+  <text class="d-t d-b" x="20" y="28">① プリンシパルとして：アプリの身元になる</text>
+  <rect class="d-box" x="20" y="48" width="210" height="104" rx="10"/>
+  <text class="d-t" x="125" y="74" text-anchor="middle">Cloud Run サービス</text>
+  <rect class="d-ok" x="40" y="88" width="170" height="48" rx="8"/>
+  <text class="d-t d-b" x="125" y="110" text-anchor="middle">app-sa</text>
+  <text class="d-s" x="125" y="128" text-anchor="middle">関連付けられた身元</text>
+
+  <text class="d-s" x="335" y="70" text-anchor="middle">誰に（プリンシパル）</text>
+  <text class="d-s" x="535" y="70" text-anchor="middle">何を（ロール）</text>
+  <text class="d-s" x="727" y="70" text-anchor="middle">どこで（リソース）</text>
+  <rect class="d-ok" x="265" y="80" width="140" height="44" rx="8"/>
+  <text class="d-t d-b" x="335" y="107" text-anchor="middle">app-sa</text>
+  <rect class="d-box" x="420" y="80" width="230" height="44" rx="8"/>
+  <text class="d-s" x="535" y="106" text-anchor="middle">roles/storage.objectViewer</text>
+  <rect class="d-box" x="665" y="80" width="125" height="44" rx="8"/>
+  <text class="d-t" x="727" y="107" text-anchor="middle">バケット</text>
+  <text class="d-s" x="265" y="148">→ アプリは app-sa の身元で、バケットのオブジェクトを読める</text>
+
+  <line class="d-line d-dashed" x1="20" y1="180" x2="800" y2="180" opacity="0.5"/>
+
+  <!-- ② リソースとして -->
+  <text class="d-t d-b" x="20" y="214">② リソースとして：使う権限を与える対象になる</text>
+  <rect class="d-box d-dashed" x="20" y="234" width="210" height="104" rx="10"/>
+  <text class="d-t" x="125" y="260" text-anchor="middle">Cloud Run サービス</text>
+  <rect class="d-ok d-dashed" x="40" y="274" width="170" height="48" rx="8"/>
+  <text class="d-t d-b" x="125" y="296" text-anchor="middle">app-sa</text>
+  <text class="d-s" x="125" y="314" text-anchor="middle">alice が関連付けてよい</text>
+
+  <text class="d-s" x="335" y="256" text-anchor="middle">誰に（プリンシパル）</text>
+  <text class="d-s" x="535" y="256" text-anchor="middle">何を（ロール）</text>
+  <text class="d-s" x="727" y="256" text-anchor="middle">どこで（リソース）</text>
+  <rect class="d-accent" x="265" y="266" width="140" height="44" rx="8"/>
+  <text class="d-t" x="335" y="293" text-anchor="middle">開発者 alice</text>
+  <rect class="d-box" x="420" y="266" width="230" height="44" rx="8"/>
+  <text class="d-s" x="535" y="292" text-anchor="middle">roles/iam.serviceAccountUser</text>
+  <rect class="d-ok" x="665" y="266" width="125" height="44" rx="8"/>
+  <text class="d-t d-b" x="727" y="293" text-anchor="middle">app-sa</text>
+  <text class="d-s" x="265" y="334">→ alice は app-sa を Cloud Run などに関連付けることができる（①の状態を作れる）</text>
+
+  <text class="d-s" x="20" y="376">権限借用（app-sa の短期の認証情報を発行して、app-sa として操作する）には、</text>
+  <text class="d-s" x="20" y="394">「何を」を roles/iam.serviceAccountTokenCreator にして同じ形で付与する</text>
+</svg>
+<figcaption>図5：同じサービスアカウント（緑）が、①では「誰に」、②では「どこで」に入る</figcaption>
+</figure>
+
+<p>「どこで」がサービスアカウントのときに付与するロールは、<strong>そのサービスアカウントを使う</strong>ものと、<strong>そのサービスアカウントを管理する</strong>ものに分かれます。</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>種類</th><th>ロール</th><th>できること</th></tr></thead>
+  <tbody>
+    <tr><td rowspan="4">使う</td><td>サービス アカウント ユーザー<br><code>roles/iam.serviceAccountUser</code></td><td>そのサービスアカウントを、Cloud Run や VM などのリソースに<strong>関連付ける</strong>ことができる</td></tr>
+    <tr><td>サービス アカウント トークン作成者<br><code>roles/iam.serviceAccountTokenCreator</code></td><td>そのサービスアカウントの短期の認証情報を発行して、そのサービスアカウントとして操作できる（<strong>サービス アカウントの権限借用</strong>、impersonation）</td></tr>
+    <tr><td>Workload Identity User<br><code>roles/iam.workloadIdentityUser</code></td><td>GKE や Workload Identity 連携のワークロードから、そのサービスアカウントの権限を借用できる</td></tr>
+    <tr><td>Service Account OpenID Connect Identity Token Creator<br><code>roles/iam.serviceAccountOpenIdTokenCreator</code></td><td>そのサービスアカウントの OIDC ID トークンだけを発行できる</td></tr>
+    <tr><td rowspan="2">管理する</td><td>Service Account Admin<br><code>roles/iam.serviceAccountAdmin</code></td><td>サービスアカウントの設定の変更や削除、<strong>このサービスアカウントの許可ポリシーの変更</strong></td></tr>
+    <tr><td>Service Account Key Admin<br><code>roles/iam.serviceAccountKeyAdmin</code></td><td>サービスアカウント キーの作成や削除（6-4）</td></tr>
+  </tbody>
+</table>
+</div>
+<p>どれも、サービスアカウントのほか、プロジェクトなどの上の階層でも付与できます。プロジェクトで付与すると、そのプロジェクトの<strong>すべての</strong>サービスアカウントが対象になるので、必要なサービスアカウントにだけ付与するのが安全です。ACE でよく問われるのは、ユーザー（関連付け）とトークン作成者（権限借用）の違いです。</p>
+<p>権限借用は、許可された人が一時的にサービスアカウントの権限を借りる正規の仕組みです。借りられる認証情報の有効期間は数時間程度で、ほとんどの監査ログには、借りた人とサービスアカウントの両方が記録されます。AWS の AssumeRole に近いものです。</p>
+
+<div class="callout warn">
+<strong>サービスアカウントの許可ポリシーでは、そのサービスアカウントが「何をできるか」は決まらない</strong>
+「どこで」をサービスアカウントにした許可ポリシーで決まるのは、<strong>誰がそのサービスアカウントを使えるか・管理できるか</strong>です。app-sa にバケットを読ませたいなら、ロールはバケット側の許可ポリシーで、app-sa を「誰に」にして付与します（図4の②）。
+<pre><code>app-sa の許可ポリシー     … 誰が app-sa を使える？   （例：alice に serviceAccountUser）
+バケット B の許可ポリシー … 誰が B を読める？        （例：app-sa に storage.objectViewer）</code></pre>
+</div>
+
+<div class="callout">
+<strong>ロールの名前は「〜する人」、権限の名前は「サービス.リソース.動詞」</strong>
+<code>roles/iam.serviceAccountUser</code> には動詞がありません。事前定義ロールの ID は <code>roles/サービス.ロール名</code> の形で、ロール名は「どんな人向けか」を表す名詞になっているからです（<code>objectViewer</code>＝オブジェクトを見る人、<code>run.invoker</code>＝呼び出す人、<code>serviceAccountUser</code>＝サービスアカウントを使う人）。動詞は、ロールの中の<strong>権限</strong>のほうに入っています。
+<pre><code>$ gcloud iam roles describe roles/iam.serviceAccountUser
+includedPermissions:
+- iam.serviceAccounts.actAs     ← サービスアカウントとして振る舞う（これが関連付けに必要な権限）
+- iam.serviceAccounts.get
+- iam.serviceAccounts.list
+- resourcemanager.projects.get
+- resourcemanager.projects.list</code></pre>
+</div>
+
+<h3>6-3. サービスアカウントの種類</h3>
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th>種類</th><th>説明</th><th>メールアドレスの例</th></tr></thead>
+  <tbody>
+    <tr><td>ユーザー管理の<br>サービスアカウント</td><td>自分で作って管理する。<strong>アプリごとに作るのが基本</strong></td><td><code>app@PROJECT_ID.iam.gserviceaccount.com</code></td></tr>
+    <tr><td>デフォルトの<br>サービスアカウント</td><td>一部のサービス（Compute Engine、App Engine など）を有効にすると自動で作られる、ユーザー管理のサービスアカウント</td><td><code>PROJECT_NUMBER-compute@developer.gserviceaccount.com</code>（Compute Engine）</td></tr>
+    <tr><td>サービス<br>エージェント</td><td>Google Cloud が作成・管理する。各サービスが、利用者に代わってリソースにアクセスするために使う</td><td>（Google が管理）</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout warn">
+<strong>デフォルトのサービスアカウントの落とし穴</strong>
+Compute Engine と App Engine のデフォルトのサービスアカウントには、作成時にプロジェクトの<strong>編集者ロールが自動で付与される</strong>ことがあります。VM を作るとき、何も指定しなければこのサービスアカウントが使われるので、<strong>VM 上のアプリがプロジェクトのほとんどを変更できる</strong>状態になります。
+<br><br>
+2024年5月3日以降に作られた組織では、組織ポリシーの制約 <code>constraints/iam.automaticIamGrantsForDefaultServiceAccounts</code> が最初から適用されていて、この自動付与は行われません。それより前からある組織や、組織のない個人のプロジェクトでは注意が必要です。
+</div>
+
+<h3>6-4. サービスアカウント キーは最後の手段</h3>
+<p>サービスアカウント キーは、サービスアカウントとして認証するための秘密鍵ファイル（JSON）です。<strong>流出すると、持っている人が誰でもそのサービスアカウントになれてしまう</strong>ため、公式ドキュメントでも「可能な限り、より安全な代替手段を選ぶ」よう勧めています。</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>やりたいこと</th><th>キーを使わない方法</th></tr></thead>
+  <tbody>
+    <tr><td>GCP 上のアプリ（Cloud Run、VM など）に権限を与えたい</td><td>サービスアカウントをリソースに<strong>関連付ける</strong></td></tr>
+    <tr><td>GCP の外（GitHub Actions、AWS、オンプレミスなど）から GCP を操作したい</td><td><strong>Workload Identity 連携</strong>で、外部の ID を使って認証する</td></tr>
+    <tr><td>開発者が、手元でサービスアカウントの権限を試したい</td><td>サービスアカウントの<strong>権限借用</strong>（トークン作成者ロール）</td></tr>
+  </tbody>
+</table>
+</div>
+<p>2024年5月3日以降に作られた組織では、サービスアカウント キーの作成も、組織ポリシーで最初から禁止されています（<code>constraints/iam.managed.disableServiceAccountKeyCreation</code>）。</p>
+
+<!-- ============================================================ -->
+<h2>7. AWS との対応</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>GCP</th><th>AWS で近いもの</th><th>注意点</th></tr></thead>
+  <tbody>
+    <tr><td>ロール（権限の束）</td><td>IAM ポリシー（権限の定義）</td><td><strong>同じ「ロール」という言葉でも意味が違う</strong></td></tr>
+    <tr><td>サービスアカウント</td><td>IAM ロール（引き受けて使う身元）</td><td>アプリに権限を与える手段という点が近い</td></tr>
+    <tr><td>許可ポリシー（リソースに付ける）</td><td>リソースベースのポリシー</td><td>GCP は基本的にこちらの形。AWS は ID ベースのポリシーが中心</td></tr>
+    <tr><td>Workload Identity 連携</td><td>OIDC プロバイダと AssumeRoleWithWebIdentity</td><td>外部の ID からキーなしで認証する仕組み</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ============================================================ -->
+<h2>8. 最小権限で設計する</h2>
+<ul>
+  <li><strong>必要な権限だけ</strong>を与える。まずは事前定義ロールから、用途に合う最も狭いものを選ぶ</li>
+  <li><strong>個人ではなくグループ</strong>に付与する。人の出入りはグループで管理する</li>
+  <li><strong>必要な階層だけ</strong>に付与する。上の階層で与えた権限は、下の階層の許可ポリシーでは取り消せない（#1）。どうしても止めたい操作は拒否ポリシーで防ぐ</li>
+  <li><strong>アプリごとに専用のサービスアカウント</strong>を作る。デフォルトのサービスアカウントをそのまま使わない</li>
+  <li><strong>サービスアカウント キーは作らない</strong>。関連付け、Workload Identity 連携、権限借用で代替する</li>
+</ul>
+
+<div class="callout lead-tip">
+<strong>テックリードの視点：チームの権限設計の例</strong>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>グループ</th><th>開発用プロジェクト</th><th>本番用プロジェクト</th></tr></thead>
+  <tbody>
+    <tr><td>開発チーム</td><td>担当サービスの事前定義ロール（デプロイや確認に必要な分）</td><td>閲覧系のロールのみ（ログの閲覧など）</td></tr>
+    <tr><td>リード・運用担当</td><td>同上</td><td>デプロイなど、必要な操作のロール</td></tr>
+    <tr><td>CI/CD</td><td colspan="2">専用のサービスアカウント。外部の CI から使うなら Workload Identity 連携で、キーは発行しない</td></tr>
+  </tbody>
+</table>
+</div>
+オフショアのチームでも同じです。メンバーの入れ替わりがあっても、グループのメンバーを変えるだけで済むようにしておきましょう。
+</div>
+
+<!-- ============================================================ -->
+<h2>9. ハンズオン：サービスアカウントにロールを付与する</h2>
+<p>学習用のプロジェクトで、サービスアカウントを作り、ロールを付与して確認し、最後に片付けます。<strong>サービスアカウントの作成とロールの付与に費用はかかりません。</strong>学習用の configuration を有効にしたターミナルで実行し、<code>PROJECT_ID</code> は自分の学習用プロジェクトの ID に置き換えてください。</p>
+
+<h3>手順1. ロールの中身を見比べる（読み取りのみ）</h3>
+<pre><code># 事前定義ロール：Storage オブジェクト閲覧者
+gcloud iam roles describe roles/storage.objectViewer
+
+# 基本ロール：閲覧者（権限の数を数える）
+gcloud iam roles describe roles/viewer --format="value(includedPermissions)" | tr ';' '\n' | wc -l
+
+# オーナーが持つ、拒否ポリシーに関する権限
+gcloud iam roles describe roles/owner --format="value(includedPermissions)" | tr ';' '\n' | grep denypolicies
+
+# プロジェクトに付いている拒否ポリシーを一覧する
+gcloud iam policies list \
+  --attachment-point=cloudresourcemanager.googleapis.com/projects/PROJECT_ID \
+  --kind=denypolicies</code></pre>
+
+<h3>手順2. サービスアカウントを作る</h3>
+<pre><code># IAM の API を有効にする（すでに有効なら何も起きない）
+gcloud services enable iam.googleapis.com
+
+# サービスアカウントを作る
+gcloud iam service-accounts create study-reader --display-name="Study reader"
+
+# 一覧で確認する
+gcloud iam service-accounts list</code></pre>
+
+<h3>手順3. プロジェクトでロールを付与する</h3>
+<pre><code>gcloud projects add-iam-policy-binding PROJECT_ID \
+  --member="serviceAccount:study-reader@PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/storage.objectViewer" \
+  --condition=None</code></pre>
+<p><code>--condition=None</code> は「条件なしのバインディングを追加する」という指定です。付けないと、条件を入力するよう聞かれることがあります。</p>
+
+<h3>手順4. 付与されたことを確認する（読み取りのみ）</h3>
+<pre><code>gcloud projects get-iam-policy PROJECT_ID \
+  --flatten="bindings[].members" \
+  --filter="bindings.members:serviceAccount:study-reader@" \
+  --format="table(bindings.role,bindings.members)"</code></pre>
+
+<h3>手順5. 片付ける（この順番で）</h3>
+<pre><code># ① 先にロールの付与を外す
+gcloud projects remove-iam-policy-binding PROJECT_ID \
+  --member="serviceAccount:study-reader@PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/storage.objectViewer" \
+  --condition=None
+
+# ② それからサービスアカウントを削除する
+gcloud iam service-accounts delete study-reader@PROJECT_ID.iam.gserviceaccount.com</code></pre>
+
+<div class="quiz">
+<p class="q">Q1. 手順1で、Storage オブジェクト閲覧者と閲覧者の権限の数はどれくらい違ったでしょう？そこから何が言えるでしょう？</p>
+<details><summary>答えを見る</summary>
+<p>Storage オブジェクト閲覧者は 8 個、閲覧者は約 6,350 個でした（2026-11 時点）。Storage オブジェクト閲覧者が「Cloud Storage のオブジェクトを読む」ことだけに絞られているのに対し、閲覧者は約300のサービスにまたがって、<strong>VM の一覧、Cloud Run や Cloud SQL の設定、シークレットの名前、ログなど、ほぼすべての設定や状態を見られる</strong>ロールです。ログにはアプリが出力した内容も含まれるので、見せたくない情報まで見えてしまう可能性があります。なお、バケットの中のオブジェクト、シークレットの値、BigQuery のテーブルのデータなど、<strong>データそのものの中身は閲覧者には含まれません</strong>（2026-11 時点で確認）。「閲覧だけだから閲覧者で」と安易に選ばず、必要なサービスの事前定義ロールを選ぶ理由がここにあります。</p>
+</details>
+
+<p class="q">Q2. 手順3で、ロールをプロジェクトで付与しました。このサービスアカウントは、どの範囲のバケットのオブジェクトを読めるでしょう？</p>
+<details><summary>答えを見る</summary>
+<p>プロジェクトの<strong>すべてのバケット</strong>のオブジェクトを読めます。プロジェクトで付与したロールは、その子にあたるすべてのリソースに引き継がれるからです（#1）。特定のバケットだけを読ませたいなら、そのバケットの許可ポリシーで付与します（<code>gcloud storage buckets add-iam-policy-binding</code>）。</p>
+</details>
+
+<p class="q">Q3. 手順5で、先にロールの付与を外したのはなぜでしょう？</p>
+<details><summary>答えを見る</summary>
+<p>サービスアカウントを先に削除すると、許可ポリシーには <code>deleted:serviceAccount:…</code> という形でバインディングが残ってしまいます。ポリシーが散らかり、あとで「これは何だったか」が分からなくなります。<strong>付与を外してから削除する</strong>のが、きれいな片付け方です。</p>
+</details>
+
+<p class="q">Q4. 手順1の後半の2つのコマンドの結果から、何が分かるでしょう？</p>
+<details><summary>答えを見る</summary>
+<p>オーナーが持つ拒否ポリシーの権限は <code>iam.denypolicies.get</code> と <code>iam.denypolicies.list</code> だけです（2026-11 時点）。つまり<strong>オーナーは拒否ポリシーを見ることはできても、作ることはできません</strong>。作るには拒否管理者（<code>roles/iam.denyAdmin</code>）が必要で、これは組織で付与するロールです。組織のない個人アカウントでは拒否ポリシーを試せないので、このハンズオンでは一覧の確認だけにしています（作成は検証していません）。</p>
+<p>一覧のコマンドは <code>{}</code> を返します。このプロジェクトには拒否ポリシーが1つもない、という意味です。</p>
+</details>
+</div>
+
+<!-- ============================================================ -->
+<h2>10. 確認テスト（ACE 形式）</h2>
+<div class="quiz">
+
+<p class="q">問1. Compute Engine の VM で動くアプリが、Cloud Storage のバケットからファイルを読む必要があります。最も安全な方法はどれでしょう？</p>
+<ol class="choices">
+  <li>サービスアカウント キーを作成し、VM の中に保存してアプリから読み込む</li>
+  <li>Compute Engine のデフォルトのサービスアカウントをそのまま使う</li>
+  <li>アプリ専用のサービスアカウントを作り、Storage オブジェクト閲覧者を付与して、VM に関連付ける</li>
+  <li>開発者の Google アカウントの認証情報を VM に設定する</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：C</strong></p>
+<p>アプリ専用のサービスアカウントに必要なロールだけを付与し、リソースに関連付けるのが基本です。A はキーが流出するリスクがあります。B は、編集者ロールが自動で付与されている場合、権限が広すぎます。D は個人の認証情報をアプリに使っていて、権限も責任の所在も不適切です。</p>
+</details>
+
+<p class="q">問2. あなたのチームは、Cloud Run にアプリケーションをデプロイしています。アプリケーションは、ユーザー管理のサービスアカウント <code>app-sa</code> の身元で動かす必要があります。プロジェクトで Cloud Run 開発者（<code>roles/run.developer</code>）のロールを持つ開発者が、<code>--service-account</code> に <code>app-sa</code> を指定してデプロイしたところ、<code>app-sa</code> に対する <code>iam.serviceAccounts.actAs</code> の権限がないというエラーで失敗しました。最小権限の原則に従って、この問題を解決したいと考えています。どうすればよいですか。</p>
+<ol class="choices">
+  <li>開発者に、プロジェクトでサービス アカウント ユーザー（<code>roles/iam.serviceAccountUser</code>）のロールを付与する</li>
+  <li><code>app-sa</code> に、プロジェクトで Cloud Run 管理者（<code>roles/run.admin</code>）のロールを付与する</li>
+  <li>開発者に、<code>app-sa</code> でサービス アカウント ユーザー（<code>roles/iam.serviceAccountUser</code>）のロールを付与する</li>
+  <li>開発者に、<code>app-sa</code> でサービス アカウント トークン作成者（<code>roles/iam.serviceAccountTokenCreator</code>）のロールを付与する</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：C</strong></p>
+<p>図5の②と同じ形です。誰に＝開発者、何を＝<code>roles/iam.serviceAccountUser</code>、どこで＝<code>app-sa</code>。サービスアカウントを関連付けるには、そのサービスアカウントの <code>iam.serviceAccounts.actAs</code> 権限が必要で、この権限はサービス アカウント ユーザーに含まれています。</p>
+<p>この権限が必要なのは、関連付けたサービスは <code>app-sa</code> の権限で動くからです。誰でも関連付けることができると、開発者は自分が持っていない権限（<code>app-sa</code> が持つ権限）を、Cloud Run を通して使えてしまいます。</p>
+<ul>
+  <li><strong>A</strong>：これでもエラーは解消します。ただし、プロジェクトで付与すると、プロジェクトの<strong>すべての</strong>サービスアカウントを関連付けられるようになり、最小権限ではありません。「最小権限」と書かれていたら、付与する場所が狭いほうを選びます</li>
+  <li><strong>B</strong>：ロールを受け取る相手が違います。足りないのは開発者の権限で、<code>app-sa</code> の権限ではありません</li>
+  <li><strong>D</strong>：トークン作成者は、<code>app-sa</code> の短期の認証情報を発行する（権限を借用する）ためのロールです。<code>iam.serviceAccounts.actAs</code> は含まれていないので、関連付けはできません</li>
+</ul>
+</details>
+
+<p class="q">問3. 組織内の複数のプロジェクトで、特定の3つの権限だけを持つロールを使いたい。合う事前定義ロールはありません。どうすればよいでしょう？</p>
+<ol class="choices">
+  <li>各プロジェクトの親フォルダで、カスタムロールを作成する</li>
+  <li>組織でカスタムロールを作成し、各プロジェクトで付与する</li>
+  <li>3つの権限を含む最も小さい基本ロールを付与する</li>
+  <li>3つの権限を、プリンシパルに直接付与する</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>カスタムロールは組織またはプロジェクトで作れます。複数のプロジェクトで使うなら、組織で作れば1回で済みます。A のフォルダでは作れません。C の基本ロールは広すぎます。D の権限は、プリンシパルに直接付与できません（必ずロールを通す）。</p>
+</details>
+
+<p class="q">問4. 協力会社のメンバー10人に、本番プロジェクトのログの閲覧だけを許可したい。今後メンバーの入れ替わりがあります。最も適切な方法はどれでしょう？</p>
+<ol class="choices">
+  <li>10人それぞれに、プロジェクトで閲覧者（<code>roles/viewer</code>）を付与する</li>
+  <li>Google グループを作って10人を入れ、プロジェクトでグループにログ閲覧者（<code>roles/logging.viewer</code>）を付与する</li>
+  <li>Google グループを作って10人を入れ、プロジェクトでグループに編集者を付与する</li>
+  <li>プロジェクトで <code>allAuthenticatedUsers</code> にログ閲覧者を付与する</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>グループに付与すれば、入れ替わりはグループのメンバーを変えるだけで済みます。ロールは目的に合う事前定義ロール（ログ閲覧者）を選びます。A は個人への付与で、閲覧者は範囲が広すぎます。C は変更までできてしまいます。D は Google アカウントを持つ世界中の誰でもログを見られる状態になります。</p>
+</details>
+
+<p class="q">問5. GitHub Actions から、GCP の Cloud Run にデプロイしたい。最も安全な認証方法はどれでしょう？</p>
+<ol class="choices">
+  <li>サービスアカウント キーを作り、GitHub のシークレットに保存する</li>
+  <li>Workload Identity 連携を設定し、GitHub の ID トークンでサービスアカウントの権限を使う</li>
+  <li>開発者の Google アカウントでログインした認証情報を、GitHub のシークレットに保存する</li>
+  <li>Cloud Run サービスに <code>allUsers</code> でデプロイ権限を付与する</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>Workload Identity 連携なら、長期間有効な鍵を GitHub に置かずに済みます。A はキーが流出するリスクがあり、新しい組織ではキーの作成自体が組織ポリシーで禁止されています。C は個人の認証情報の流用です。D は誰でもデプロイできてしまいます。</p>
+</details>
+
+<p class="q">問6. 開発チームのグループは、フォルダ「本番」でオーナーを持っています。運用の都合ですぐには外せません。それでも、本番のプロジェクトの削除だけは、管理者のグループ以外にはさせたくありません。どうすればよいでしょう？</p>
+<ol class="choices">
+  <li>本番の各プロジェクトの許可ポリシーで、開発チームのグループに閲覧者を付与する</li>
+  <li>フォルダ「本番」に拒否ポリシーを付け、全員に対して <code>cloudresourcemanager.googleapis.com/projects.delete</code> を拒否し、管理者のグループを例外にする</li>
+  <li>組織ポリシーで、開発チームのグループがプロジェクトを削除できないようにする</li>
+  <li>本番の各プロジェクトの許可ポリシーから、開発チームのグループのオーナーを削除する</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>拒否ポリシーは許可より先に判定されるので、オーナーを持っていても削除できなくなります。フォルダに付ければ、配下のプロジェクトすべてに引き継がれます。管理者だけは例外にするため、<code>exceptionPrincipals</code> に管理者のグループを書きます。</p>
+<p>A は足し算なので、オーナーの権限は残ります。C の組織ポリシーは「どんな設定を許すか」を決めるもので、特定のグループを対象にはできません。D のオーナーはフォルダで付与されたもので、プロジェクトの許可ポリシーには書かれていません。</p>
+</details>
+</div>
+
+<!-- ============================================================ -->
+<h2>まとめ</h2>
+<ul>
+  <li>IAM は「誰に（プリンシパル）・何を（ロール）・どこで（許可ポリシーを付けたリソース）」で考える</li>
+  <li>権限は必ずロールにまとめて付与する。ロールは事前定義ロールから選び、合わなければカスタムロール（組織かプロジェクトで作る）。基本ロール（管理者・書き込み・読み取りと、従来のオーナー・編集者・閲覧者）は本番で原則使わない</li>
+  <li>拒否ポリシーは許可より先に判定され、拒否されればどんなロールを持っていても使えない。組織・フォルダ・プロジェクトに付けられ、ロールではなく権限を直接書く。作るには組織で付与する拒否管理者が必要</li>
+  <li>チームへの付与はグループで行う。<code>allUsers</code> と <code>allAuthenticatedUsers</code> は社外も含む</li>
+  <li>Cloud Run や VM などのサービスのリソースは「誰に」になれないので、サービスアカウントを関連付ける。入ってくる通信はそのリソース自身の許可ポリシー、出ていく通信は関連付けられたサービスアカウントを「誰に」にして、行き先の許可ポリシーで判定される</li>
+  <li>サービスアカウントはアプリの身元で、プリンシパルでもありリソースでもある。サービスアカウントの許可ポリシーで決まるのは「誰が使えるか・管理できるか」。関連付けにはサービス アカウント ユーザー、権限借用にはトークン作成者が必要</li>
+  <li>サービスアカウント キーは最後の手段。関連付け、Workload Identity 連携、権限借用で代替する</li>
+</ul>
+<p>次回：<a href="03-network.html"><strong>#3 ネットワーク基礎</strong></a>（VPC、サブネット、ファイアウォールルール、外部 IP と内部 IP、Cloud NAT、IAP）</p>
+
+<p class="lead">参考（公式ドキュメント）：<a href="https://cloud.google.com/iam/docs/overview">IAM の概要</a>　／　<a href="https://cloud.google.com/iam/docs/roles-overview">ロールの概要</a>　／　<a href="https://cloud.google.com/iam/docs/service-account-overview">サービスアカウントの概要</a>　／　<a href="https://cloud.google.com/iam/docs/principals-overview">プリンシパルの概要</a>　／　<a href="https://cloud.google.com/iam/docs/deny-overview">拒否ポリシー</a></p>
+
+<footer><a href="../index.html">← ロードマップに戻る</a>　｜　最終更新：2026-11-19</footer>
+</main>
+</body>
+</html>
