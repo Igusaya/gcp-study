@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#5 Cloud Run ハンズオン | GCP 学習</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<!-- 矢印の定義（ページ内の全 SVG で共有） -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="d-arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+    <marker id="arr-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="d-arrowhead-ok" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+    <marker id="arr-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="d-arrowhead-accent" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+</svg>
+
+<main>
+<p class="breadcrumb"><a href="../index.html">← ロードマップ</a>　｜　<a href="04-compute-options.html">← #4 実行環境の選び方</a></p>
+<h1>#5 Cloud Run ハンズオン</h1>
+<p class="lead">コンテナ イメージを作って Artifact Registry に置き、Cloud Run にデプロイする。リビジョンとトラフィック、呼び出しの認証、サービス ID まで</p>
+
+<div class="card">
+<strong>この回のゴール</strong>
+<ul>
+  <li>ソースコードが、コンテナ イメージ → Artifact Registry → Cloud Run サービスと進んで URL になるまでの流れを説明できる</li>
+  <li>Cloud Run のサービス・リビジョン・インスタンスの関係と、台数の増減のしかたを説明できる</li>
+  <li>新しいリビジョンにトラフィックを流さずにデプロイし、一部だけ切り替えたり、元に戻したりできる</li>
+  <li>サービスを呼べる人（<code>roles/run.invoker</code>）と、サービスが使う権限（サービス ID）の違いを説明できる</li>
+</ul>
+</div>
+
+<!-- ============================================================ -->
+<h2>1. 全体像：ソースコードから URL まで</h2>
+<p>Cloud Run は、<strong>コンテナ イメージ</strong>を受け取って動かします。手元のソースコードからイメージを作り（ビルド）、Google Cloud のイメージ置き場である <strong>Artifact Registry</strong> に置き（push）、Cloud Run にそのイメージを指定してデプロイすると、URL が発行されます。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 300" role="img" aria-labelledby="f1-title">
+  <title id="f1-title">ソースコードをビルドしてコンテナ イメージにし、Artifact Registry に push して、Cloud Run にデプロイする流れ</title>
+  <rect class="d-band" x="10" y="10" width="390" height="200" rx="10"/>
+  <text class="d-s d-b" x="26" y="34">手元の PC</text>
+  <rect class="d-band" x="420" y="10" width="390" height="200" rx="10"/>
+  <text class="d-s d-b" x="436" y="34">Google Cloud（プロジェクト）</text>
+
+  <rect class="d-box" x="30" y="60" width="150" height="120" rx="8"/>
+  <text class="d-t d-b" x="105" y="98" text-anchor="middle">ソースコード</text>
+  <text class="d-s" x="105" y="126" text-anchor="middle">app.py</text>
+  <text class="d-s" x="105" y="148" text-anchor="middle">Dockerfile</text>
+
+  <rect class="d-box" x="230" y="60" width="150" height="120" rx="8"/>
+  <text class="d-t d-b" x="305" y="98" text-anchor="middle">コンテナ イメージ</text>
+  <text class="d-s" x="305" y="126" text-anchor="middle">hello:v1</text>
+  <text class="d-s" x="305" y="148" text-anchor="middle">linux/amd64</text>
+
+  <rect class="d-accent" x="440" y="60" width="160" height="120" rx="8"/>
+  <text class="d-t d-b" x="520" y="98" text-anchor="middle">Artifact Registry</text>
+  <text class="d-s" x="520" y="126" text-anchor="middle">リポジトリ</text>
+  <text class="d-s" x="520" y="148" text-anchor="middle">study-repo</text>
+
+  <rect class="d-ok" x="640" y="60" width="160" height="120" rx="8"/>
+  <text class="d-t d-b" x="720" y="98" text-anchor="middle">Cloud Run</text>
+  <text class="d-s" x="720" y="126" text-anchor="middle">サービス hello</text>
+  <text class="d-s" x="720" y="148" text-anchor="middle">URL が発行される</text>
+
+  <rect class="d-note d-dashed" x="30" y="234" width="570" height="44" rx="8"/>
+  <text class="d-s" x="315" y="261" text-anchor="middle">gcloud run deploy --source を使うと、①② を Cloud Build が代わりに行う</text>
+
+  <rect class="d-box" x="640" y="234" width="160" height="44" rx="8"/>
+  <text class="d-s" x="720" y="261" text-anchor="middle">利用者・ほかのサービス</text>
+
+  <!-- 矢印（枠のあとに描く） -->
+  <path class="d-line-accent" d="M182,120 L228,120" marker-end="url(#arr-accent)"/>
+  <text class="d-t d-b d-c-accent" x="205" y="108" text-anchor="middle" style="font-size:20px">①</text>
+  <path class="d-line-accent" d="M382,120 L438,120" marker-end="url(#arr-accent)"/>
+  <text class="d-t d-b d-c-accent" x="410" y="108" text-anchor="middle" style="font-size:20px">②</text>
+  <path class="d-line-accent" d="M602,120 L638,120" marker-end="url(#arr-accent)"/>
+  <text class="d-t d-b d-c-accent" x="620" y="108" text-anchor="middle" style="font-size:20px">③</text>
+  <path class="d-line" d="M720,232 L720,184" marker-end="url(#arr)"/>
+  <text class="d-s" x="712" y="218" text-anchor="end">HTTPS</text>
+</svg>
+<figcaption>図1：ソースコードから URL まで。①ビルド ②push ③デプロイ</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th>手順</th><th>すること</th><th>コマンドの例</th></tr></thead>
+  <tbody>
+    <tr><td>① ビルド</td><td>Dockerfile からコンテナ イメージを作る</td><td><code>docker build</code></td></tr>
+    <tr><td>② push</td><td>イメージを Artifact Registry のリポジトリに置く</td><td><code>docker push</code></td></tr>
+    <tr><td>③ デプロイ</td><td>イメージを指定して Cloud Run のサービスを作る・更新する</td><td><code>gcloud run deploy --image</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ============================================================ -->
+<h2>2. Artifact Registry：イメージの置き場所</h2>
+<p>Artifact Registry は、コンテナ イメージや言語のパッケージ（npm、Maven、Python など）を保管するサービスです。イメージは<strong>リポジトリ</strong>に入れます。リポジトリは作るときに、<strong>形式</strong>（Docker など）と<strong>ロケーション</strong>（リージョンなど）を決めます。</p>
+
+<h3>イメージの名前の読み方</h3>
+<pre><code>asia-northeast1-docker.pkg.dev/PROJECT_ID/study-repo/hello:v1</code></pre>
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th>部分</th><th>意味</th></tr></thead>
+  <tbody>
+    <tr><td><code>asia-northeast1-docker.pkg.dev</code></td><td>リポジトリのロケーション（東京）の、Docker 用のホスト</td></tr>
+    <tr><td><code>PROJECT_ID</code></td><td>リポジトリがあるプロジェクト</td></tr>
+    <tr><td><code>study-repo</code></td><td>リポジトリの名前</td></tr>
+    <tr><td><code>hello</code></td><td>イメージの名前</td></tr>
+    <tr><td><code>v1</code></td><td>タグ（バージョンなどの目印）。付け替えられる</td></tr>
+  </tbody>
+</table>
+</div>
+<ul>
+  <li><strong>認証</strong>：<code>docker push</code> の前に <code>gcloud auth configure-docker asia-northeast1-docker.pkg.dev</code> を1回実行します。Docker の設定ファイル（<code>~/.docker/config.json</code>）の <code>credHelpers</code> に、このホストの認証を gcloud に任せる設定（gcloud CLI 認証情報ヘルパー）が追加されます。ほかのホストの設定はそのまま残ります</li>
+  <li><strong>Container Registry</strong>（<code>gcr.io</code>）は以前のイメージ置き場です。非推奨になり、2025 年 3 月 18 日にシャットダウンされて、イメージを書き込めなくなりました。推奨されている後継が Artifact Registry です</li>
+  <li><strong>ロケーション</strong>は、Cloud Run と同じリージョンにするのが基本です。同じロケーションの中のデータ転送は無料で、リージョンをまたぐと転送の料金がかかります</li>
+</ul>
+
+<div class="callout warn">
+<strong>Apple シリコンの Mac でビルドするときの注意</strong>
+<p>Cloud Run のコンテナの実行ファイルは、Linux 64 ビット（x86_64）用にコンパイルされている必要があります（コンテナ ランタイムの契約）。Apple シリコン（M1 など）の Mac でそのまま <code>docker build</code> すると、<code>linux/arm64</code> 用のイメージができて、Cloud Run では期待どおりに動かないことがあります。公式ドキュメントでは、Cloud Build でビルドする方法が案内されています。</p>
+<p>このハンズオンでは手元でビルドするので、<code>docker build --platform linux/amd64</code> と指定して <code>linux/amd64</code> 用のイメージを作ります（<code>--platform</code> は Docker の機能で、Google Cloud のドキュメントには書かれていません）。</p>
+</div>
+
+<!-- ============================================================ -->
+<h2>3. Cloud Run の仕組み</h2>
+
+<h3>3-1. サービス・リビジョン・インスタンス</h3>
+<figure class="diagram">
+<svg viewBox="0 0 820 330" role="img" aria-labelledby="f2-title">
+  <title id="f2-title">サービスの中にリビジョンがあり、トラフィックの割合に応じてリクエストが振り分けられ、各リビジョンのインスタンスが処理する</title>
+  <rect class="d-box" x="10" y="135" width="110" height="60" rx="8"/>
+  <text class="d-t" x="65" y="161" text-anchor="middle">リクエスト</text>
+  <text class="d-s" x="65" y="182" text-anchor="middle">URL は1つ</text>
+
+  <rect class="d-box" x="150" y="10" width="660" height="310" rx="10"/>
+  <text class="d-t d-b" x="170" y="38">サービス hello</text>
+  <text class="d-s" x="290" y="38">設定やイメージを変えてデプロイするたびに、リビジョンが増える</text>
+
+  <rect class="d-accent" x="170" y="135" width="120" height="60" rx="8"/>
+  <text class="d-s d-b" x="230" y="160" text-anchor="middle">トラフィックの</text>
+  <text class="d-s d-b" x="230" y="180" text-anchor="middle">割り当て</text>
+
+  <rect class="d-box" x="350" y="60" width="440" height="125" rx="8"/>
+  <text class="d-t d-b" x="366" y="86">リビジョン hello-00001（MESSAGE=v1）</text>
+  <rect class="d-ok" x="366" y="104" width="110" height="50" rx="6"/>
+  <text class="d-s" x="421" y="134" text-anchor="middle">インスタンス</text>
+  <rect class="d-ok" x="486" y="104" width="110" height="50" rx="6"/>
+  <text class="d-s" x="541" y="134" text-anchor="middle">インスタンス</text>
+  <rect class="d-ok" x="606" y="104" width="110" height="50" rx="6"/>
+  <text class="d-s" x="661" y="134" text-anchor="middle">インスタンス</text>
+  <text class="d-s" x="366" y="174">リクエストが増えるとインスタンスが増える</text>
+
+  <rect class="d-box" x="350" y="200" width="440" height="110" rx="8"/>
+  <text class="d-t d-b" x="366" y="226">リビジョン hello-00002（MESSAGE=v2）</text>
+  <text class="d-s" x="366" y="248">タグ green を付けると、このリビジョン専用の URL でも呼べる</text>
+  <rect class="d-ok" x="366" y="258" width="110" height="40" rx="6"/>
+  <text class="d-s" x="421" y="283" text-anchor="middle">インスタンス</text>
+  <text class="d-s" x="490" y="283">リクエストがなければ 0 台まで減る</text>
+
+  <!-- 矢印（枠のあとに描く） -->
+  <path class="d-line" d="M122,165 L168,165" marker-end="url(#arr)"/>
+  <path class="d-line-accent" d="M292,152 L348,124" marker-end="url(#arr-accent)"/>
+  <text class="d-t d-b d-c-accent" x="314" y="126" text-anchor="middle">90%</text>
+  <path class="d-line-accent" d="M292,180 L348,250" marker-end="url(#arr-accent)"/>
+  <text class="d-t d-b d-c-accent" x="302" y="236" text-anchor="middle">10%</text>
+</svg>
+<figcaption>図2：サービス・リビジョン・インスタンス。リクエストは、トラフィックの割合に応じてリビジョンに振り分けられる</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th>用語</th><th>意味</th></tr></thead>
+  <tbody>
+    <tr><td>サービス</td><td>デプロイの単位。URL を持つ。リージョンのリソースで、名前とリージョンで区別する</td></tr>
+    <tr><td>リビジョン</td><td>デプロイのたびに作られる、イメージと設定の組。作った後は変更できない。古いリビジョンも残るので、戻すことができる</td></tr>
+    <tr><td>インスタンス</td><td>リビジョンのコンテナを実際に動かしているもの。リクエストの量に応じて自動で増減する</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>3-2. 台数の増減と料金</h3>
+<ul>
+  <li><strong>インスタンスあたりの最大同時リクエスト数</strong>：1つのインスタンスは、複数のリクエストを同時に処理します。上限を超えると、インスタンスが増えます。既定値は、gcloud で新しく作ったサービスでは vCPU の数 × 80（vCPU が 1 なら 80）、コンソールで作ったサービスでは 80 です。最大 1,000 まで増やせます</li>
+  <li><strong>最大インスタンス数</strong>：増えすぎを防ぐ上限です（既定ではリビジョンごとに 100）。データベースの接続数を守るときや、料金を抑えるときに使います</li>
+  <li><strong>最小インスタンス数</strong>：既定は 0 で、リクエストがないと 0 台まで減ります。0 台から最初のリクエストを受けると、インスタンスの起動を待つ（<strong>コールド スタート</strong>）ので応答が遅くなります。1 以上にすると速くなりますが、その台数分の料金がかかり続けます</li>
+  <li><strong>課金設定</strong>：既定の<strong>リクエスト ベースの課金</strong>では、リクエストを処理している間だけ CPU とメモリの料金がかかります（リクエストの数にも料金がかかる）。リクエストの処理が終わった後もバックグラウンドで処理を続けたいなら、<strong>インスタンス ベースの課金</strong>にします。以前はそれぞれ「リクエストの処理中にのみ CPU を割り当てる」「CPU を常に割り当てる」と呼ばれていたので、古い問題文ではこの名前で出ることがあります</li>
+</ul>
+
+<h3>3-3. リビジョンとトラフィック</h3>
+<p>新しいイメージや設定でデプロイすると、新しいリビジョンが作られ、既定では<strong>すぐにすべてのトラフィックが新しいリビジョンに移ります</strong>。本番では、次のように段階的に切り替えることができます。</p>
+<ol>
+  <li><code>--no-traffic</code> と <code>--tag</code> を付けてデプロイする：新しいリビジョンにはトラフィックを流さず、タグ専用の URL（<code>https://TAG---…run.app</code>）でだけ呼べるようにする</li>
+  <li>タグの URL で動作を確認する</li>
+  <li><code>gcloud run services update-traffic</code> で、少しずつ割合を増やす（例：10% → 50% → 100%）</li>
+  <li>問題が出たら、前のリビジョンに 100% を戻す（<strong>ロールバック</strong>）。古いリビジョンは残っているので、ビルドし直す必要はない</li>
+</ol>
+<p>注意：トラフィックを分割したり、前のリビジョンに固定したりすると、その後のデプロイでもその割り当てが続き、新しいリビジョンには自動でトラフィックが移りません。最新のリビジョンに自動で移る状態に戻すには、<code>update-traffic --to-latest</code> を実行します。</p>
+
+<!-- ============================================================ -->
+<h2>4. 誰が呼べるか、サービスは何ができるか</h2>
+<p>#2 の 6-1 で学んだように、サービスのリソースでは「入ってくる通信」と「出ていく通信」を分けて考えます。Cloud Run では、入ってくる通信は <strong>サービスの許可ポリシー</strong>で、出ていく通信は <strong>サービス ID</strong>（サービスに関連付けたサービス アカウント）の権限で決まります。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 300" role="img" aria-labelledby="f3-title">
+  <title id="f3-title">入ってくる通信はサービスの許可ポリシーの roles/run.invoker で判定し、出ていく通信はサービス ID を誰にとして行き先の許可ポリシーで判定する</title>
+  <text class="d-s d-b" x="10" y="24">入ってくる通信：誰が呼べるか</text>
+  <text class="d-s d-b" x="600" y="24">出ていく通信：何ができるか</text>
+
+  <rect class="d-warn" x="10" y="42" width="210" height="60" rx="8"/>
+  <text class="d-t" x="115" y="68" text-anchor="middle">トークンなし</text>
+  <text class="d-s" x="115" y="90" text-anchor="middle">（限定公開サービスの場合）</text>
+
+  <rect class="d-ok" x="10" y="140" width="210" height="70" rx="8"/>
+  <text class="d-t" x="115" y="167" text-anchor="middle">ID トークン付き</text>
+  <text class="d-s" x="115" y="190" text-anchor="middle">roles/run.invoker を持つ</text>
+
+  <rect class="d-accent" x="300" y="50" width="200" height="160" rx="10"/>
+  <text class="d-t d-b" x="400" y="86" text-anchor="middle">Cloud Run</text>
+  <text class="d-t" x="400" y="110" text-anchor="middle">サービス hello</text>
+  <path class="d-line" d="M320,130 L480,130"/>
+  <text class="d-s" x="400" y="160" text-anchor="middle">サービス ID</text>
+  <text class="d-s d-b" x="400" y="182" text-anchor="middle">hello-run-sa</text>
+
+  <rect class="d-box" x="600" y="50" width="210" height="160" rx="10"/>
+  <text class="d-t" x="705" y="90" text-anchor="middle">Cloud Storage など</text>
+  <text class="d-s" x="705" y="114" text-anchor="middle">ほかの Google Cloud の API</text>
+  <text class="d-s" x="705" y="160" text-anchor="middle">判定：行き先の</text>
+  <text class="d-s" x="705" y="182" text-anchor="middle">許可ポリシー</text>
+
+  <text class="d-s" x="10" y="252">入ってくる通信：サービスの許可ポリシーで判定（roles/run.invoker を持つプリンシパルだけが呼べる）</text>
+  <text class="d-s" x="10" y="280">出ていく通信：サービス ID を「誰に」にして、行き先の許可ポリシーで判定（#2 の 6-1 と同じ考え方）</text>
+
+  <!-- 矢印（枠のあとに描く） -->
+  <path class="d-line-warn d-dashed" d="M222,72 L298,96"/>
+  <text class="d-s d-b d-c-warn" x="262" y="70" text-anchor="middle">✕ 403</text>
+  <path class="d-line-ok" d="M222,175 L298,165" marker-end="url(#arr-ok)"/>
+  <text class="d-s d-b d-c-ok" x="262" y="196" text-anchor="middle">✓ 呼べる</text>
+  <path class="d-line" d="M502,130 L598,130" marker-end="url(#arr)"/>
+  <text class="d-s" x="550" y="112" text-anchor="middle">サービス ID</text>
+  <text class="d-s" x="550" y="150" text-anchor="middle">として呼ぶ</text>
+</svg>
+<figcaption>図3：入ってくる通信は roles/run.invoker、出ていく通信はサービス ID の権限で決まる</figcaption>
+</figure>
+
+<h3>4-1. 呼び出しの認証：誰が呼べるか</h3>
+<ul>
+  <li>サービスを呼ぶには、サービス（またはプロジェクト）の許可ポリシーで、<strong>Cloud Run 起動元</strong>（<code>roles/run.invoker</code>）を持っている必要があります。持っていないと <code>403</code> が返ります</li>
+  <li>呼ぶ側は、リクエストに <strong>ID トークン</strong>を付けます。開発者が試すときは、<code>gcloud auth print-identity-token</code> で取得したトークンを付けて curl で呼ぶか、<code>gcloud run services proxy</code>（Cloud Run プロキシ）を使います</li>
+  <li><strong>限定公開サービス</strong>（社内の API、ほかのサービスからだけ呼ばれるもの）にするときは <code>--no-allow-unauthenticated</code> でデプロイし、呼ぶ側のプリンシパル（ほかのサービスのサービス ID など）にだけ <code>roles/run.invoker</code> を付与します</li>
+  <li><strong>公開サービス</strong>（誰でも呼べる Web サイトや公開 API）にする方法は2つあります
+    <ul>
+      <li>Cloud Run 起動元の IAM チェックを無効にする（<code>--no-invoker-iam-check</code>）。公式ドキュメントではこちらが推奨です</li>
+      <li><code>allUsers</code> に <code>roles/run.invoker</code> を付与する（<code>--allow-unauthenticated</code>）。組織ポリシーの「ドメインで制限された共有」で <code>allUsers</code> への付与が禁止されているとできません</li>
+    </ul>
+  </li>
+  <li><code>--allow-unauthenticated</code> と <code>--no-allow-unauthenticated</code> のどちらも付けずにデプロイすると、どちらにするかを聞かれます</li>
+  <li><strong>ネットワーク上り（内向き）の設定</strong>（ingress）で、どこからのリクエストを受け付けるかも絞れます。この設定は IAM より先に評価されます
+    <ul>
+      <li>すべて（<code>all</code>）：インターネットから <code>run.app</code> の URL に直接届くリクエストも受け付ける（既定）</li>
+      <li>内部（<code>internal</code>）：同じプロジェクトの VPC ネットワークや、同じプロジェクトの Cloud Scheduler・Pub/Sub などからだけ受け付ける</li>
+      <li>内部と Cloud Load Balancing（<code>internal-and-cloud-load-balancing</code>）：内部に加えて、外部アプリケーション ロードバランサ経由も受け付ける</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>4-2. サービス ID：サービスは何ができるか</h3>
+<ul>
+  <li>サービスの中のコードが Google Cloud の API を呼ぶときは、サービス ID の権限で呼びます</li>
+  <li>指定しないと、<strong>Compute Engine のデフォルト サービス アカウント</strong>を使います。#4 の 2-1 で見たように、このサービス アカウントには編集者ロールが付いていることがあり、権限が大きすぎます</li>
+  <li>推奨は<strong>ユーザー管理のサービス アカウント</strong>です。サービスごとに専用のサービス アカウントを作り、必要なロールだけを付けて、<code>--service-account</code> で関連付けます</li>
+  <li>デプロイする人（デプロイ担当者アカウント）は、そのサービス アカウントに対するサービス アカウント ユーザーのロール（<code>roles/iam.serviceAccountUser</code>。<code>iam.serviceAccounts.actAs</code> を含む）を持っている必要があります（#2 の 6-2）</li>
+</ul>
+
+<h3>Cloud Run の主なロール</h3>
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th>ロール</th><th>できること</th></tr></thead>
+  <tbody>
+    <tr><td>Cloud Run 管理者<br><code>roles/run.admin</code></td><td>Cloud Run のすべてのリソースを完全に管理できる。許可ポリシーの変更も含む</td></tr>
+    <tr><td>Cloud Run デベロッパー<br><code>roles/run.developer</code></td><td>Cloud Run のすべてのリソースの読み取りと書き込み（作成・更新・削除）。許可ポリシーは変更できない</td></tr>
+    <tr><td>Cloud Run 起動元<br><code>roles/run.invoker</code></td><td>サービスを呼び出す、ジョブを実行する</td></tr>
+    <tr><td>Cloud Run 閲覧者<br><code>roles/run.viewer</code></td><td>Cloud Run のすべてのリソースの状態を見る（許可ポリシーを含む）</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout ace">
+<strong>ACE のポイント</strong>
+<ul>
+  <li>「新しいバージョンを一部のユーザーだけで試す」「カナリア リリース」→ <code>--no-traffic</code>（＋<code>--tag</code>）でデプロイし、<code>update-traffic</code> で割合を指定する。「すぐに元に戻したい」→ 前のリビジョンに 100% を戻す</li>
+  <li>「誰でもアクセスできる」→ <code>allUsers</code> に <code>roles/run.invoker</code>（<code>--allow-unauthenticated</code>）、または Cloud Run 起動元の IAM チェックの無効化。「特定のサービスからだけ呼ばせたい」→ 呼ぶ側のサービス アカウントに <code>roles/run.invoker</code>。「インターネットから直接は届かないようにしたい」→ ネットワーク上り（内向き）の設定を内部に</li>
+  <li>「Cloud Run から Cloud Storage などを使う。最小権限で」→ 専用のサービス アカウントを作り、必要なロールだけを付けて、サービス ID に指定する。デフォルト サービス アカウントやサービス アカウント キーは使わない</li>
+  <li>「最初のリクエストが遅い（コールド スタート）」→ 最小インスタンス数を 1 以上にする（料金はかかり続ける）。「データベースの接続が多すぎる」「費用の上限」→ 最大インスタンス数</li>
+  <li>イメージは Artifact Registry に置く（Container Registry はシャットダウン済み）。<code>gcloud run deploy --source</code> なら、Cloud Build がビルドして Artifact Registry の <code>cloud-run-source-deploy</code> リポジトリに置く</li>
+</ul>
+</div>
+
+<!-- ============================================================ -->
+<h2>5. テックリードの視点</h2>
+<div class="callout lead-tip">
+<strong>参画したら確認したいこと</strong>
+<ul class="check">
+  <li>イメージのタグをどう付けているか（<code>latest</code> だけだと、どのリビジョンがどのコードか追えない。Git のコミット ID などを付けているか）</li>
+  <li>ビルドとデプロイを誰が・何で行っているか（手元の PC からか、Cloud Build や GitHub Actions などの CI/CD からか）</li>
+  <li>リリースは一気に切り替えているか、<code>--no-traffic</code> とタグで段階的に切り替えているか。ロールバックの手順は決まっているか</li>
+  <li>サービスごとに専用のサービス アカウントを使っているか。デフォルト サービス アカウントのままになっていないか</li>
+  <li>公開サービス（<code>allUsers</code> に <code>roles/run.invoker</code>、または IAM チェックを無効化）はどれか。それは意図どおりか。ネットワーク上り（内向き）の設定はどうなっているか</li>
+  <li>最小インスタンス数を 1 以上にしているサービスはどれか（使っていなくても料金がかかる）</li>
+</ul>
+</div>
+<ul>
+  <li><strong>オフショアチームへの説明</strong>：図1の①②③のどこで失敗しているかを切り分けると、問い合わせが速くなる。たとえば「push で 403」は Artifact Registry の権限や認証の設定、「デプロイ後に起動しない」はコンテナ（ポート、CPU のアーキテクチャ）の問題であることが多い</li>
+  <li><strong>よくある誤解</strong>：「サービスを呼べる権限」と「サービスが使える権限」を混同しやすい。前者は <code>roles/run.invoker</code>（呼ぶ側に付ける）、後者はサービス ID（サービスに関連付けたサービス アカウント）のロール</li>
+  <li><strong>設計レビューの観点</strong>：アプリが状態を持っていないか（インスタンスはいつでも増減・停止するので、セッションやファイルはインスタンスの中に置かない）。設定値や秘密情報をイメージに含めていないか（環境変数や Secret Manager で渡す）</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>6. ハンズオン：イメージを作って Cloud Run にデプロイする</h2>
+<p>学習用の configuration を有効にしたターミナルで実行します（<code>export CLOUDSDK_ACTIVE_CONFIG_NAME=study</code>）。Docker が動いている必要があります。</p>
+<p><strong>料金について</strong>：このハンズオンの規模なら、無料枠に収まる見込みです。</p>
+<ul>
+  <li>Cloud Run（リクエスト ベースの課金）：毎月 180,000 vCPU 秒、360,000 GiB 秒、200 万リクエストまで無料。IAM で拒否されたリクエスト（手順7の 403）は課金されない</li>
+  <li>Artifact Registry：ストレージは毎月 0.5 GiB まで無料（今回のイメージは数十 MB）。同じリージョンの Cloud Run への転送は無料</li>
+  <li>無料枠は、どちらも請求先アカウント単位で、プロジェクトをまたいで合算されます</li>
+  <li>イメージは手元でビルドするので、Cloud Build は使いません。サービスは限定公開にし、最大インスタンス数を 1 にします。最後にサービス・リポジトリ・サービス アカウントを削除します</li>
+</ul>
+
+<h3>手順1. API を有効にする</h3>
+<pre><code>gcloud services enable run.googleapis.com artifactregistry.googleapis.com</code></pre>
+
+<h3>手順2. Artifact Registry のリポジトリを作る</h3>
+<p>このあとのコマンドで使う値を、シェルの変数に入れておきます（ターミナルを開き直したら、もう一度実行します）。</p>
+<pre><code>REGION=asia-northeast1
+PROJECT_ID=$(gcloud config get-value project)
+REPO=study-repo
+IMAGE=$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/hello:v1
+
+gcloud artifacts repositories create $REPO \
+  --repository-format=docker \
+  --location=$REGION \
+  --description="study"
+
+gcloud artifacts repositories list --location=$REGION</code></pre>
+
+<h3>手順3. アプリを用意する</h3>
+<p>作業用のディレクトリ（例：<code>hello</code>）を作り、次の2つのファイルを置きます。Python の標準ライブラリだけで書いた、JSON を返す小さな Web サーバーです。</p>
+<p><code>app.py</code></p>
+<pre><code>import json
+import os
+import signal
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = {
+            "message": os.environ.get("MESSAGE", "hello"),
+            "revision": os.environ.get("K_REVISION", "local"),
+        }
+        data = (json.dumps(body, ensure_ascii=False) + "\n").encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(data)
+        print(f"GET {self.path} -&gt; 200", flush=True)  # 標準出力は Cloud Logging に送られる
+
+    def log_message(self, format, *args):
+        pass  # 既定のアクセスログ（標準エラー出力）は出さない
+
+
+# Cloud Run はインスタンスを止める前に SIGTERM を送る
+signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
+
+port = int(os.environ.get("PORT", "8080"))  # Cloud Run が PORT 環境変数で待ち受けるポートを渡す
+HTTPServer(("", port), Handler).serve_forever()</code></pre>
+<p><code>Dockerfile</code></p>
+<pre><code>FROM python:3.12-slim
+WORKDIR /app
+COPY app.py .
+CMD ["python", "app.py"]</code></pre>
+<ul>
+  <li><code>PORT</code>：Cloud Run は、コンテナが待ち受けるポートを <code>PORT</code> 環境変数で渡します（既定は 8080）。待ち受けるアドレスは <code>0.0.0.0</code> にする必要があります（<code>127.0.0.1</code> では届かない）。<code>HTTPServer(("", port), …)</code> の <code>""</code> は <code>0.0.0.0</code> と同じ意味です</li>
+  <li><code>K_REVISION</code>：Cloud Run が設定する環境変数で、いま動いているリビジョンの名前が入ります。どのリビジョンが応答したかを確かめるために返しています</li>
+  <li><code>MESSAGE</code>：デプロイのときに自分で設定する環境変数です</li>
+</ul>
+
+<h3>手順4. ビルドして push する</h3>
+<pre><code># hello ディレクトリで実行する
+# Docker の設定に、Artifact Registry の認証を gcloud に任せる設定を追加する（1回だけ）
+gcloud auth configure-docker $REGION-docker.pkg.dev
+
+# ① ビルド（Cloud Run 用に linux/amd64 を指定する）
+docker build --platform linux/amd64 -t $IMAGE .
+
+# （任意）手元で動かしてみる。別のターミナルで curl localhost:8080 を実行し、Ctrl+C で止める
+docker run --rm -p 8080:8080 -e MESSAGE=local $IMAGE
+
+# ② push
+docker push $IMAGE
+
+# リポジトリに入ったことを確認する
+gcloud artifacts docker images list $REGION-docker.pkg.dev/$PROJECT_ID/$REPO --include-tags</code></pre>
+
+<h3>手順5. サービス ID 用のサービス アカウントを作る</h3>
+<pre><code>gcloud iam service-accounts create hello-run-sa --display-name="hello Cloud Run service"
+SA=hello-run-sa@$PROJECT_ID.iam.gserviceaccount.com</code></pre>
+<p>このアプリは Google Cloud の API を呼ばないので、ロールは付けません。</p>
+
+<h3>手順6. ③ デプロイする（限定公開サービス）</h3>
+<pre><code>gcloud run deploy hello \
+  --image=$IMAGE \
+  --region=$REGION \
+  --service-account=$SA \
+  --no-allow-unauthenticated \
+  --max-instances=1 \
+  --set-env-vars=MESSAGE=v1</code></pre>
+<div class="table-wrap">
+<table class="kv">
+  <thead><tr><th>指定</th><th>意味</th></tr></thead>
+  <tbody>
+    <tr><td><code>--image</code></td><td>手順4で push したイメージ</td></tr>
+    <tr><td><code>--region</code></td><td>Cloud Run のサービスはリージョンのリソース。リポジトリと同じ東京にする</td></tr>
+    <tr><td><code>--service-account</code></td><td>サービス ID。指定しないと、Compute Engine のデフォルト サービス アカウントになる</td></tr>
+    <tr><td><code>--no-allow-unauthenticated</code></td><td>限定公開サービスにする（<code>allUsers</code> に <code>roles/run.invoker</code> を付けない）</td></tr>
+    <tr><td><code>--max-instances</code></td><td>インスタンスを最大 1 台にする（料金の上限のため）</td></tr>
+    <tr><td><code>--set-env-vars</code></td><td>環境変数 <code>MESSAGE</code> を設定する。<code>--set-env-vars</code> は、ここに書かなかった既存の環境変数を消す（手順8では、既存を残す <code>--update-env-vars</code> を使う）</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>手順7. 呼んでみる</h3>
+<pre><code>URL=$(gcloud run services describe hello --region=$REGION --format="value(status.url)")
+echo $URL
+
+# トークンなし：403 が返る
+curl -s -o /dev/null -w "%{http_code}\n" $URL
+
+# ID トークン付き：応答が返る（トークンの有効期間は1時間）
+TOKEN=$(gcloud auth print-identity-token)
+curl -H "Authorization: Bearer $TOKEN" $URL</code></pre>
+<p>自分のアカウントはプロジェクトのオーナーなので、<code>roles/run.invoker</code> の権限も持っています。<code>gcloud auth print-identity-token</code> で作ったトークンは、開発中に試すためのものです。アプリからほかのサービスを呼ぶときは、サービス ID のトークンを使います。</p>
+
+<h3>手順8. 新しいリビジョンを、トラフィックを流さずにデプロイする</h3>
+<pre><code># 環境変数だけを変える（--update-env-vars はほかの環境変数を残す）。設定を変えても新しいリビジョンができる
+gcloud run services update hello --region=$REGION \
+  --update-env-vars=MESSAGE=v2 \
+  --no-traffic \
+  --tag=green
+
+# リビジョンが2つになった
+gcloud run revisions list --service=hello --region=$REGION
+
+# トラフィックの割り当て（新しいリビジョンは 0%、タグ green の URL がある）
+gcloud run services describe hello --region=$REGION --format="yaml(status.traffic)"
+
+# サービスの URL は v1 のまま
+curl -H "Authorization: Bearer $TOKEN" $URL
+
+# タグの URL（上の status.traffic の url）だと v2 が返る
+curl -H "Authorization: Bearer $TOKEN" https://green---…（上でコピーした URL）</code></pre>
+
+<h3>手順9. 半分ずつ流してから、全部切り替える</h3>
+<pre><code># タグ green のリビジョンに 50%
+gcloud run services update-traffic hello --region=$REGION --to-tags=green=50
+
+# 何回か呼ぶと、v1 と v2 が混ざって返る
+for i in 1 2 3 4 5 6; do curl -s -H "Authorization: Bearer $TOKEN" $URL; done
+
+# 最新のリビジョンに 100%（今後のデプロイでも、最新のリビジョンに自動で移る状態に戻る）
+gcloud run services update-traffic hello --region=$REGION --to-latest
+curl -H "Authorization: Bearer $TOKEN" $URL</code></pre>
+
+<h3>手順10. ロールバックする</h3>
+<pre><code># 1つ目のリビジョンの名前（hello-00001-xxx）を確認する
+gcloud run revisions list --service=hello --region=$REGION
+
+# 1つ目のリビジョンに 100% を戻す（名前は上で確認したものに置き換える）
+gcloud run services update-traffic hello --region=$REGION --to-revisions=hello-00001-xxx=100
+curl -H "Authorization: Bearer $TOKEN" $URL</code></pre>
+
+<h3>手順11. ログを見る</h3>
+<pre><code>gcloud run services logs read hello --region=$REGION --limit=10</code></pre>
+<p>アプリが標準出力に書いた <code>GET / -&gt; 200</code> が、Cloud Logging に送られています。</p>
+
+<h3>手順12. 片付ける</h3>
+<pre><code>gcloud run services delete hello --region=$REGION
+gcloud artifacts repositories delete $REPO --location=$REGION
+gcloud iam service-accounts delete $SA
+
+# 手元のイメージも消す
+docker rmi $IMAGE
+
+# 残っていないことを確認する（Listed 0 items.）
+gcloud run services list
+gcloud artifacts repositories list</code></pre>
+<p>リポジトリを削除すると、中のイメージも一緒に削除されます。有効にした API はそのままで構いません（有効にしているだけでは料金はかかりません）。</p>
+
+<div class="quiz">
+<p class="q">Q1. 手順7で、トークンを付けないと 403 が返ったのはなぜでしょう？誰でも呼べるようにするには、どうすればよいでしょう？</p>
+<details><summary>答えを見る</summary>
+<p><code>--no-allow-unauthenticated</code> でデプロイしたので、<code>roles/run.invoker</code> を持つプリンシパルしか呼べないからです。トークンがないと、誰からのリクエストか判断できません。誰でも呼べるようにするには、Cloud Run 起動元の IAM チェックを無効にする（<code>--no-invoker-iam-check</code>。公式の推奨）か、<code>allUsers</code> に <code>roles/run.invoker</code> を付与します（<code>--allow-unauthenticated</code>）。</p>
+</details>
+
+<p class="q">Q2. 手順8では、イメージを変えずに環境変数だけを変えました。それでも新しいリビジョンができたのはなぜでしょう？</p>
+<details><summary>答えを見る</summary>
+<p>リビジョンは、イメージと設定の組で、作った後は変更できないからです。環境変数などの設定を変えると、新しいリビジョンになります。そのおかげで、手順10のように、設定の変更も前のリビジョンに戻すだけで元に戻せます。</p>
+</details>
+
+<p class="q">Q3. 手順4で <code>--platform linux/amd64</code> を付けなかったら、どうなるでしょう？（Apple シリコンの Mac の場合）</p>
+<details><summary>答えを見る</summary>
+<p><code>linux/arm64</code> 用のイメージができます。push はできますが、Cloud Run のコンテナは Linux 64 ビット（x86_64）用である必要があるので、期待どおりに動きません。<code>--platform linux/amd64</code> を付けてビルドし直すか、Cloud Build でビルドします。</p>
+</details>
+</div>
+
+<!-- ============================================================ -->
+<h2>7. 確認テスト（ACE 形式）</h2>
+<div class="quiz">
+
+<p class="q">問1. Cloud Run で動いている Web アプリの新しいバージョンをリリースします。まず利用者の 10% だけに新しいバージョンを使ってもらい、問題がなければ全員に広げたいと考えています。どうすればよいですか。</p>
+<ol class="choices">
+  <li>新しいバージョンを別の Cloud Run サービスとしてデプロイし、利用者に新しい URL を案内する</li>
+  <li>新しいバージョンを <code>--no-traffic</code> を付けてデプロイし、<code>gcloud run services update-traffic</code> で新しいリビジョンに 10% を割り当てる</li>
+  <li>新しいバージョンをそのままデプロイし、最大インスタンス数を 10% に減らす</li>
+  <li>新しいバージョンを Compute Engine の VM にデプロイし、ロードバランサで 10% を振り分ける</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>Cloud Run は、リビジョンごとにトラフィックの割合を指定できます。<code>--no-traffic</code> でデプロイすれば、新しいリビジョンにはまだトラフィックが流れないので、そこから割合を少しずつ増やせます。</p>
+<ul>
+  <li><strong>A</strong>：利用者に URL を変えてもらう必要があり、割合も制御できません</li>
+  <li><strong>C</strong>：そのままデプロイすると、すべてのトラフィックが新しいリビジョンに移ります。最大インスタンス数は台数の上限で、トラフィックの割合ではありません</li>
+  <li><strong>D</strong>：Cloud Run の機能で実現できることに、余計な運用を増やします</li>
+</ul>
+</details>
+
+<p class="q">問2. Cloud Run の新しいリビジョンに 100% のトラフィックを切り替えたところ、エラーが急増しました。できるだけ早く元の状態に戻したいと考えています。どうすればよいですか。</p>
+<ol class="choices">
+  <li>前のバージョンのソースコードからイメージをビルドし直し、デプロイする</li>
+  <li>新しいリビジョンの最小インスタンス数を 0 にする</li>
+  <li><code>gcloud run services update-traffic</code> で、前のリビジョンに 100% を割り当てる</li>
+  <li>サービスを削除し、前のバージョンのイメージで作り直す</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：C</strong></p>
+<p>前のリビジョンは残っているので、トラフィックの割り当てを変えるだけで、すぐに戻せます。</p>
+<ul>
+  <li><strong>A</strong>：ビルドとデプロイに時間がかかります</li>
+  <li><strong>B</strong>：最小インスタンス数は待機させておく台数の設定で、どのリビジョンにトラフィックを流すかは変わりません</li>
+  <li><strong>D</strong>：URL が変わる可能性があり、時間もかかります</li>
+</ul>
+</details>
+
+<p class="q">問3. Cloud Run のサービス A を、同じプロジェクトにある Cloud Run のサービス B からだけ呼べるようにしたいと考えています。インターネットの誰からでも呼べる状態にはしたくありません。どうすればよいですか。</p>
+<ol class="choices">
+  <li>サービス A を <code>--allow-unauthenticated</code> でデプロイし、URL をサービス B にだけ教える</li>
+  <li>サービス A を <code>--no-allow-unauthenticated</code> でデプロイし、サービス B のサービス ID に、サービス A に対する <code>roles/run.invoker</code> を付与する</li>
+  <li>サービス B のサービス ID に、プロジェクトの <code>roles/run.admin</code> を付与する</li>
+  <li>サービス A のサービス ID に、サービス B に対する <code>roles/run.invoker</code> を付与する</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>サービスを呼べるかどうかは、呼ばれる側（サービス A）の許可ポリシーで、呼ぶ側（サービス B のサービス ID）に <code>roles/run.invoker</code> があるかで決まります。</p>
+<ul>
+  <li><strong>A</strong>：URL を知っていれば誰でも呼べてしまいます</li>
+  <li><strong>C</strong>：呼べるようにはなりますが、サービスの作成や削除までできてしまい、最小権限ではありません</li>
+  <li><strong>D</strong>：向きが逆です。これはサービス A がサービス B を呼べるようにする設定です</li>
+</ul>
+</details>
+
+<p class="q">問4. Cloud Run のサービスから、Cloud Storage のバケットにあるファイルを読み取ります。最小権限の原則に従いたいと考えています。どうすればよいですか。</p>
+<ol class="choices">
+  <li>サービスのサービス ID は指定せず、Compute Engine のデフォルト サービス アカウントを使う</li>
+  <li>サービス アカウント キーを作成してコンテナ イメージに含め、アプリから読み込む</li>
+  <li>専用のサービス アカウントを作り、そのバケットに対する <code>roles/storage.objectViewer</code> を付与して、サービスのサービス ID に指定する</li>
+  <li>バケットの <code>allUsers</code> に <code>roles/storage.objectViewer</code> を付与する</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：C</strong></p>
+<p>サービスが API を呼ぶときは、サービス ID の権限を使います。専用のサービス アカウントに、必要なバケットの読み取りロールだけを付けるのが最小権限です。</p>
+<ul>
+  <li><strong>A</strong>：デフォルト サービス アカウントには編集者ロールが付いていることがあり、権限が大きすぎます</li>
+  <li><strong>B</strong>：キーが漏れる危険があります。Cloud Run ではキーは不要です</li>
+  <li><strong>D</strong>：インターネットの誰でもファイルを読めてしまいます</li>
+</ul>
+</details>
+
+<p class="q">問5. Cloud Run の API は、夜間はリクエストがほとんどありません。朝の最初のリクエストだけ応答が数秒遅いという苦情があります。どうすればよいですか。</p>
+<ol class="choices">
+  <li>最大インスタンス数を増やす</li>
+  <li>最小インスタンス数を 1 以上にする</li>
+  <li>1つのインスタンスが同時に処理するリクエストの数を増やす</li>
+  <li>サービスを別のリージョンにデプロイし直す</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：B</strong></p>
+<p>リクエストがない間にインスタンスが 0 台まで減り、最初のリクエストでインスタンスの起動を待っている（コールド スタート）と考えられます。最小インスタンス数を 1 以上にすると、起動したインスタンスが残ります。ただし、その分の料金がかかり続けます。</p>
+<ul>
+  <li><strong>A</strong>：上限を上げても、0 台から起動する遅れはなくなりません</li>
+  <li><strong>C</strong>：インスタンスが動いているときの処理の量は変わりますが、0 台からの起動の遅れはなくなりません</li>
+  <li><strong>D</strong>：リージョンを変えても、コールド スタートは起きます</li>
+</ul>
+</details>
+
+<p class="q">問6. 開発チームが、手元で作ったコンテナ イメージを Cloud Run にデプロイしたいと考えています。Google Cloud の推奨に従って、イメージをどこに置けばよいですか。</p>
+<ol class="choices">
+  <li>Container Registry（<code>gcr.io</code>）</li>
+  <li>Cloud Storage のバケットに、イメージを tar ファイルとして保存する</li>
+  <li>Cloud Run と同じリージョンにある、Artifact Registry の Docker 形式のリポジトリ</li>
+  <li>Compute Engine の VM のディスク</li>
+</ol>
+<details><summary>答えを見る</summary>
+<p><strong>正解：C</strong></p>
+<p>コンテナ イメージは Artifact Registry に置きます。Cloud Run と同じリージョンにすると、イメージの取り出しが速く、ネットワークの料金もかかりません。</p>
+<ul>
+  <li><strong>A</strong>：Container Registry は 2025 年 3 月 18 日にシャットダウンされ、イメージを書き込めません</li>
+  <li><strong>B、D</strong>：Cloud Run には、コンテナ レジストリにあるイメージを指定してデプロイします。バケットの tar ファイルや VM のディスクは指定できません</li>
+</ul>
+</details>
+
+</div>
+
+<!-- ============================================================ -->
+<h2>まとめ</h2>
+<ul>
+  <li>ソースコード →（①ビルド）→ コンテナ イメージ →（②push）→ Artifact Registry →（③デプロイ）→ Cloud Run サービス。Apple シリコンの Mac では <code>linux/amd64</code> でビルドする</li>
+  <li>サービスの中に、変更できないリビジョンが積み重なる。トラフィックはリビジョンごとに割合で割り当てられ、<code>--no-traffic</code> とタグで段階的に切り替え、前のリビジョンに戻してロールバックできる</li>
+  <li>インスタンスはリクエストに応じて増減し、既定では 0 台まで減る。コールド スタートが気になるなら最小インスタンス数、上限は最大インスタンス数</li>
+  <li>誰が呼べるかは <code>roles/run.invoker</code>（公開するなら IAM チェックの無効化か <code>allUsers</code>）と、ネットワーク上り（内向き）の設定。サービスが何をできるかはサービス ID。サービス ID には専用のサービス アカウントを使う</li>
+</ul>
+<p>次回：<strong>#6 データストア概観</strong>（Cloud SQL / Firestore / Cloud Storage / BigQuery の使い分け）</p>
+
+<p class="lead">参考（公式ドキュメント）：<a href="https://docs.cloud.google.com/run/docs/resource-model">リソースモデル</a>　／　<a href="https://docs.cloud.google.com/run/docs/container-contract">コンテナ ランタイムの契約</a>　／　<a href="https://docs.cloud.google.com/run/docs/about-concurrency">同時実行</a>　／　<a href="https://docs.cloud.google.com/run/docs/configuring/billing-settings">課金設定</a>　／　<a href="https://docs.cloud.google.com/run/docs/rollouts-rollbacks-traffic-migration">ロールバック、段階的なロールアウト、トラフィックの移行</a>　／　<a href="https://docs.cloud.google.com/run/docs/authenticating/public">公開アクセスを許可する</a>　／　<a href="https://docs.cloud.google.com/run/docs/authenticating/developers">デベロッパーの認証</a>　／　<a href="https://docs.cloud.google.com/run/docs/securing/ingress">ネットワーク上り（内向き）の設定</a>　／　<a href="https://docs.cloud.google.com/run/docs/securing/service-identity">サービス ID</a>　／　<a href="https://docs.cloud.google.com/run/docs/reference/iam/roles">Cloud Run の IAM ロール</a>　／　<a href="https://docs.cloud.google.com/run/docs/deploying-source-code">ソースからのデプロイ</a>　／　<a href="https://docs.cloud.google.com/artifact-registry/docs/docker/pushing-and-pulling">イメージの push と pull</a>　／　<a href="https://docs.cloud.google.com/artifact-registry/docs/transition/transition-from-gcr">Container Registry からの移行</a>　／　<a href="https://cloud.google.com/run/pricing">Cloud Run の料金</a>　／　<a href="https://cloud.google.com/artifact-registry/pricing">Artifact Registry の料金</a></p>
+
+<footer><a href="../index.html">← ロードマップに戻る</a>　｜　最終更新：2026-11-24</footer>
+</main>
+</body>
+</html>
